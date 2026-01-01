@@ -48,8 +48,8 @@ runcmd:
   # Enable fail2ban
   - [ sh, -c, "systemctl enable --now fail2ban" ]
 
-  # Install systemctl-tui
-  - [ sh, -c, "curl https://raw.githubusercontent.com/rgwood/systemctl-tui/master/install.sh | bash" ]
+  # Install systemctl-tui (system-wide)
+  - [ sh, -c, "DIR=/usr/local/bin curl https://raw.githubusercontent.com/rgwood/systemctl-tui/master/install.sh | bash" ]
 
 %{ if install_docker ~}
   # Remove old docker packages (ignore errors if not present)

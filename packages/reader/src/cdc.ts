@@ -38,8 +38,8 @@ export async function startCdcConsumer({ nc, js, redis, log }: CdcConsumerOption
       break;
     } catch (err) {
       if (i === maxRetries - 1) {
-        log.error('CDC stream not found after max retries - cache invalidation disabled');
-        return;
+        log.error('CDC stream not found after max retries - exiting');
+        process.exit(1);
       }
       log.info(`Waiting for CDC stream (attempt ${i + 1}/${maxRetries})...`);
       await new Promise((resolve) => setTimeout(resolve, retryDelay));
