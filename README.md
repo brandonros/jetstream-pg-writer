@@ -13,46 +13,20 @@ Client ──▶ Producer (HTTP) ──▶ JetStream ──▶ Consumer ──�
 Postgres WAL ──▶ Debezium ──▶ JetStream ──▶ Reader ──▶ Redis invalidation
 ```
 
-## Run locally
+## Quick start
+
+Requires [just](https://github.com/casey/just). Run `just` to see all commands.
 
 ```bash
-# Start everything
-docker compose up --build
+just up        # Start everything locally (http://localhost)
+just dev       # Infrastructure only (nats, postgres, redis, debezium)
+just clean     # Wipe volumes
 
-# Frontend: http://localhost
-# API: http://localhost/api/health
-```
-
-## Deploy
-
-```bash
-cd terraform
-terraform init
-terraform apply
-```
-
-Provisions a Vultr instance with Docker, clones the repo, and starts services via systemd + cloud-init.
-
-## Update
-
-```bash
-ssh user@<server-ip>
-cd ~/jetstream-pg-writer
-git pull
-sudo systemctl restart jetstream-pg-writer
-```
-
-## Dev
-
-```bash
-# Infrastructure only
-docker compose up nats postgres redis debezium
-
-# Run services locally (4 terminals)
-pnpm dev:consumer
-pnpm dev:producer
-pnpm dev:reader
-pnpm dev:frontend
+just go        # Deploy to Vultr + wait for ready
+just ssh       # Connect to server
+just update    # git pull + restart on server
+just logs      # Tail server logs
+just destroy   # Tear down infrastructure
 ```
 
 ## Structure
