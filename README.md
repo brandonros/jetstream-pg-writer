@@ -42,11 +42,7 @@ packages/
 
 ## Cache invalidation (CDC)
 
-Debezium Server connects to Postgres logical replication and streams WAL changes to NATS JetStream.
-
-```
-config/debezium/application.properties  # Debezium config
-```
+Debezium Server connects to Postgres logical replication and streams WAL changes to NATS JetStream. Configuration is in `docker-compose.yaml` (debezium service environment variables).
 
 - **Source**: Postgres with `wal_level=logical`
 - **Sink**: NATS JetStream (`DebeziumStream`)

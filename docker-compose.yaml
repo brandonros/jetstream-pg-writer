@@ -59,6 +59,7 @@ services:
       DEBEZIUM_SINK_TYPE: nats-jetstream
       DEBEZIUM_SINK_NATS_JETSTREAM_URL: nats://nats:4222
       DEBEZIUM_SINK_NATS_JETSTREAM_CREATE_STREAM: "true"
+      DEBEZIUM_SINK_NATS_JETSTREAM_SUBJECTS: cdc.>
       # Source: PostgreSQL
       DEBEZIUM_SOURCE_CONNECTOR_CLASS: io.debezium.connector.postgresql.PostgresConnector
       DEBEZIUM_SOURCE_OFFSET_STORAGE_FILE_FILENAME: data/offsets.dat
