@@ -25,6 +25,11 @@ services:
       - ./schema/migrations:/docker-entrypoint-initdb.d/migrations
     ports:
       - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jetstream -d jetstream"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
 
   redis:
     image: redis:8-alpine
@@ -34,18 +39,30 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
 
   debezium:
     image: quay.io/debezium/server:3.0
     depends_on:
-      - postgres
-      - nats
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
     volumes:
       - ./config/debezium:/debezium/conf
       - debezium-data:/debezium/data
     environment:
-      # Give Postgres time to start and run migrations
       DEBEZIUM_SOURCE_DATABASE_HOSTNAME: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/q/health/ready || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
 
   producer:
     build:
@@ -64,8 +81,10 @@ services:
       context: .
       dockerfile: packages/consumer/Dockerfile
     depends_on:
-      - nats
-      - postgres
+      nats:
+        condition: service_started
+      postgres:
+        condition: service_healthy
     environment:
       NATS_URL: nats://nats:4222
       DATABASE_URL: postgres://jetstream:jetstream@postgres:5432/jetstream
@@ -77,9 +96,14 @@ services:
     ports:
       - "3001:3001"
     depends_on:
-      - nats
-      - redis
-      - postgres
+      nats:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      debezium:
+        condition: service_healthy
     environment:
       NATS_URL: nats://nats:4222
       REDIS_URL: redis://redis:6379

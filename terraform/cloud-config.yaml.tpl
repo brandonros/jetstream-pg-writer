@@ -49,7 +49,7 @@ runcmd:
   - [ sh, -c, "systemctl enable --now fail2ban" ]
 
   # Install systemctl-tui (system-wide)
-  - [ sh, -c, "DIR=/usr/local/bin curl https://raw.githubusercontent.com/rgwood/systemctl-tui/master/install.sh | bash" ]
+  - [ sh, -c, "curl https://raw.githubusercontent.com/rgwood/systemctl-tui/master/install.sh | DIR=/usr/local/bin bash" ]
 
 %{ if install_docker ~}
   # Remove old docker packages (ignore errors if not present)
@@ -67,8 +67,8 @@ runcmd:
   - [ sh, -c, "systemctl enable --now docker" ]
   - [ sh, -c, "usermod -aG docker user" ]
 
-  # Install lazydocker
-  - [ sh, -c, "curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | bash" ]
+  # Install lazydocker (system-wide)
+  - [ sh, -c, "curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | DIR=/usr/local/bin bash" ]
 %{ endif ~}
 
 %{ if deploy_app ~}
