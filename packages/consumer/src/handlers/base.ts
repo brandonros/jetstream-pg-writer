@@ -4,6 +4,9 @@ import type { WriteRequest, WriteResponse } from '@jetstream-pg-writer/shared';
 
 const sc = StringCodec();
 
+// Postgres error code for unique_violation
+const PG_UNIQUE_VIOLATION = '23505';
+
 export abstract class BaseHandler<T> {
   protected js: JetStreamClient;
   protected nc: NatsConnection;
@@ -75,39 +78,19 @@ export abstract class BaseHandler<T> {
   }
 
   private async processWrite(operationId: string, data: T): Promise<boolean> {
-    const client = await this.db.connect();
-
     try {
-      await client.query('BEGIN');
-
-      const check = await client.query(
-        'SELECT 1 FROM processed_operations WHERE operation_id = $1',
-        [operationId]
-      );
-
-      if (check.rows.length > 0) {
-        await client.query('ROLLBACK');
-        return false;
-      }
-
-      await this.insert(client, operationId, data);
-
-      await client.query(
-        'INSERT INTO processed_operations (operation_id, created_at) VALUES ($1, NOW())',
-        [operationId]
-      );
-
-      await client.query('COMMIT');
+      await this.insert(this.db, operationId, data);
       return true;
     } catch (error) {
-      await client.query('ROLLBACK');
+      // PK/unique violation means duplicate - treat as success
+      if (error instanceof Error && 'code' in error && error.code === PG_UNIQUE_VIOLATION) {
+        return false;
+      }
       throw error;
-    } finally {
-      client.release();
     }
   }
 
-  protected abstract insert(client: pg.PoolClient, operationId: string, data: T): Promise<void>;
+  protected abstract insert(db: pg.Pool, operationId: string, data: T): Promise<void>;
 
   private isRetryable(error: unknown): boolean {
     if (error instanceof Error) {

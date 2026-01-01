@@ -1,9 +1,3 @@
--- Idempotency tracking
-CREATE TABLE IF NOT EXISTS processed_operations (
-  operation_id UUID PRIMARY KEY,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
 -- Users table (id is the operationId from the write request)
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY,
