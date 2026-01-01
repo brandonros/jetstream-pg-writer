@@ -64,9 +64,11 @@ services:
     ports:
       - "3001:3001"
     depends_on:
+      - nats
       - redis
       - postgres
     environment:
+      NATS_URL: nats://nats:4222
       REDIS_URL: redis://redis:6379
       DATABASE_URL: postgres://jetstream:jetstream@postgres:5432/jetstream
       PORT: "3001"

@@ -1,11 +1,14 @@
 import Fastify from 'fastify';
 import pg from 'pg';
 import Redis from 'ioredis';
+import { connect, NatsConnection, StringCodec } from 'nats';
 
 const fastify = Fastify({ logger: true });
+const sc = StringCodec();
 
 let db: pg.Pool;
 let redis: Redis;
+let nc: NatsConnection;
 
 const CACHE_TTL_SECONDS = 30;
 
@@ -77,11 +80,46 @@ fastify.get<{ Querystring: { userId?: string } }>('/orders', async (request) => 
   return { orders };
 });
 
+interface InvalidationPayload {
+  table: string;
+  data: { userId?: string };
+}
+
+async function startInvalidationSubscriber() {
+  const sub = nc.subscribe('cache.invalidate');
+  fastify.log.info('Subscribed to cache.invalidate');
+
+  for await (const msg of sub) {
+    try {
+      const payload: InvalidationPayload = JSON.parse(sc.decode(msg.data));
+
+      if (payload.table === 'users') {
+        await redis.del('users:all');
+        fastify.log.info('Invalidated users:all');
+      } else if (payload.table === 'orders') {
+        await redis.del('orders:all');
+        if (payload.data?.userId) {
+          await redis.del(`orders:user:${payload.data.userId}`);
+          fastify.log.info({ userId: payload.data.userId }, 'Invalidated orders cache');
+        } else {
+          fastify.log.info('Invalidated orders:all');
+        }
+      }
+    } catch (err) {
+      fastify.log.error({ err }, 'Failed to process invalidation');
+    }
+  }
+}
+
 async function main() {
+  const natsUrl = process.env.NATS_URL || 'nats://localhost:4222';
   const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
   const databaseUrl = process.env.DATABASE_URL || 'postgres://jetstream:jetstream@localhost:5432/jetstream';
   const port = parseInt(process.env.PORT || '3001', 10);
   const host = process.env.HOST || '0.0.0.0';
+
+  nc = await connect({ servers: natsUrl });
+  fastify.log.info('Connected to NATS');
 
   redis = new Redis(redisUrl);
   db = new pg.Pool({ connectionString: databaseUrl });
@@ -92,11 +130,15 @@ async function main() {
   await db.query('SELECT 1');
   fastify.log.info('Connected to Postgres');
 
+  // Start invalidation subscriber in background
+  startInvalidationSubscriber();
+
   await fastify.listen({ port, host });
 
   const shutdown = async () => {
     console.log('Shutting down...');
     await fastify.close();
+    await nc.close();
     await redis.quit();
     await db.end();
     process.exit(0);
