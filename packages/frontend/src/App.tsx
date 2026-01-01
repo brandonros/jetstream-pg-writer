@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import type { UserRow, OrderRow } from '@jetstream-pg-writer/shared';
 
 interface ApiResult {
   success: boolean;
@@ -7,25 +8,10 @@ interface ApiResult {
   error?: string;
 }
 
-interface User {
-  id: string;
-  name: string;
-  email: string;
-  created_at: string;
-}
-
-interface Order {
-  id: string;
-  user_id: string;
-  items: Array<{ productId: string; quantity: number; price: number }>;
-  total: string;
-  created_at: string;
-}
-
 export function App() {
   const [results, setResults] = useState<string[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [users, setUsers] = useState<UserRow[]>([]);
+  const [orders, setOrders] = useState<OrderRow[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<string>('');
   const [loading, setLoading] = useState(false);
 
