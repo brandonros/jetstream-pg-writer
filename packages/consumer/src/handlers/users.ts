@@ -6,10 +6,10 @@ export class UsersHandler extends BaseHandler<UserData> {
   readonly table = 'users';
   readonly consumerName = 'users-writer';
 
-  protected async insert(client: pg.PoolClient, _operationId: string, data: UserData): Promise<void> {
+  protected async insert(client: pg.PoolClient, operationId: string, data: UserData): Promise<void> {
     await client.query(
-      'INSERT INTO users (name, email) VALUES ($1, $2)',
-      [data.name, data.email]
+      'INSERT INTO users (id, name, email) VALUES ($1, $2, $3)',
+      [operationId, data.name, data.email]
     );
   }
 }

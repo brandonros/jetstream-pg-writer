@@ -4,9 +4,9 @@ CREATE TABLE IF NOT EXISTS processed_operations (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Users table
+-- Users table (id is the operationId from the write request)
 CREATE TABLE IF NOT EXISTS users (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY,
   name TEXT NOT NULL,
   email TEXT UNIQUE NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

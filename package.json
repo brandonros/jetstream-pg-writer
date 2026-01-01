@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "dev:producer": "pnpm --filter @jetstream-pg-writer/producer dev",
-    "dev:consumer": "pnpm --filter @jetstream-pg-writer/consumer dev"
+    "dev:consumer": "pnpm --filter @jetstream-pg-writer/consumer dev",
+    "dev:frontend": "pnpm --filter @jetstream-pg-writer/frontend dev"
   },
   "devDependencies": {
     "typescript": "^5.7.0"
