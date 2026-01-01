@@ -1,0 +1,43 @@
+# Dependencies
+node_modules
+**/node_modules
+
+# Git
+.git
+.gitignore
+
+# Build artifacts
+dist
+**/dist
+*.tsbuildinfo
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Terraform
+terraform/.terraform
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfvars
+
+# Misc
+README.md
+LICENSE
+*.md

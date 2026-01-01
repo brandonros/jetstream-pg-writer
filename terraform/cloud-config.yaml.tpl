@@ -65,7 +65,7 @@ runcmd:
 %{ if deploy_app ~}
   - [ sh, -c, "git clone https://github.com/brandonros/jetstream-pg-writer.git /home/user/jetstream-pg-writer" ]
   - [ sh, -c, "chown -R user:user /home/user/jetstream-pg-writer" ]
-  - [ sh, -c, "install -m 644 /home/user/jetstream-pg-writer/jetstream-pg-writer.service /etc/systemd/system/" ]
+  - [ sh, -c, "install -m 644 /home/user/jetstream-pg-writer/systemd/jetstream-pg-writer.service /etc/systemd/system/" ]
   - [ sh, -c, "systemctl daemon-reload" ]
   - [ sh, -c, "systemctl enable --now jetstream-pg-writer" ]
 %{ endif ~}
