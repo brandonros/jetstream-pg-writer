@@ -1,24 +1,24 @@
 import { connect, NatsConnection, JetStreamClient, StringCodec, JsMsg } from 'nats';
+import { Pool } from 'pg';
 import { WriteRequest, WriteResponse } from '../shared/types';
 
 const sc = StringCodec();
 
-// Simulating your DB - in reality this is Postgres/whatever
-interface Database {
-  query(sql: string, params: unknown[]): Promise<{ rowCount: number }>;
-}
-
 class Consumer {
   private nc!: NatsConnection;
   private js!: JetStreamClient;
-  private db: Database;
+  private db: Pool;
 
-  constructor(db: Database) {
-    this.db = db;
+  constructor() {
+    this.db = new Pool({
+      connectionString: process.env.DATABASE_URL || 'postgres://jetstream:jetstream@localhost:5432/jetstream',
+    });
   }
 
   async connect() {
-    this.nc = await connect({ servers: 'localhost:4222' });
+    const natsUrl = process.env.NATS_URL || 'nats://localhost:4222';
+    
+    this.nc = await connect({ servers: natsUrl });
     this.js = this.nc.jetstream();
 
     // Create durable consumer
@@ -26,13 +26,15 @@ class Consumer {
     try {
       await jsm.consumers.add('WRITES', {
         durable_name: 'db-writer',
-        ack_policy: 'explicit',      // We control when to ack
-        max_deliver: 3,              // Retry up to 3 times
-        ack_wait: 30_000_000_000,    // 30s in nanos - time before redelivery
+        ack_policy: 'explicit',
+        max_deliver: 3,
+        ack_wait: 30_000_000_000,
       });
     } catch (e) {
       // Consumer already exists
     }
+
+    console.log(`Consumer connected to ${natsUrl}`);
   }
 
   async start() {
@@ -55,7 +57,6 @@ class Consumer {
     let response: WriteResponse;
 
     try {
-      // Idempotent write - use operationId to dedupe at DB level
       await this.idempotentWrite(request);
       
       response = {
@@ -63,7 +64,6 @@ class Consumer {
         operationId: request.operationId,
       };
 
-      // Only ACK after successful DB write
       msg.ack();
       console.log(`Completed: ${request.operationId}`);
 
@@ -77,43 +77,28 @@ class Consumer {
         error: errMsg,
       };
 
-      // Determine if retryable
       if (this.isRetryable(error)) {
-        // NAK triggers redelivery (with backoff based on consumer config)
         msg.nak();
       } else {
-        // Non-retryable - ack to prevent infinite retry, but report failure
         msg.ack();
       }
     }
 
-    // Reply to producer if they're waiting
     if (replyTo) {
       this.nc.publish(replyTo, sc.encode(JSON.stringify(response)));
     }
   }
 
   private async idempotentWrite(request: WriteRequest): Promise<void> {
-    // Option 1: Use operationId as primary key / unique constraint
-    // INSERT ... ON CONFLICT (operation_id) DO NOTHING
-    //
-    // Option 2: Separate idempotency table
-    // 
-    // This is pseudo-code - adjust for your DB/ORM
-    
     await this.db.query(
-      `INSERT INTO ${request.table} (operation_id, data, created_at)
-       VALUES ($1, $2, NOW())
+      `INSERT INTO writes (operation_id, table_name, data, created_at)
+       VALUES ($1, $2, $3, NOW())
        ON CONFLICT (operation_id) DO NOTHING`,
-      [request.operationId, JSON.stringify(request.data)]
+      [request.operationId, request.table, JSON.stringify(request.data)]
     );
-    
-    // Note: ON CONFLICT DO NOTHING means duplicate operations silently succeed
-    // which is exactly what you want for idempotency
   }
 
   private isRetryable(error: unknown): boolean {
-    // Retry on transient failures
     if (error instanceof Error) {
       const msg = error.message.toLowerCase();
       return (
@@ -127,6 +112,22 @@ class Consumer {
   }
 
   async close() {
+    await this.db.end();
     await this.nc.close();
   }
 }
+
+async function main() {
+  const consumer = new Consumer();
+  await consumer.connect();
+  
+  process.on('SIGINT', async () => {
+    console.log('Shutting down...');
+    await consumer.close();
+    process.exit(0);
+  });
+
+  await consumer.start();
+}
+
+main().catch(console.error);

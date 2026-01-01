@@ -24,6 +24,7 @@ services:
       - POSTGRES_INITDB_ARGS=--auth-host=md5
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./schema/init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
       - "127.0.0.1:5432:5432"
 
@@ -31,7 +32,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["node", "dist/producer.js"]
+    command: ["npx", "tsx", "src/producer/main.ts"]
     depends_on:
       - nats
     environment:
@@ -41,7 +42,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["node", "dist/consumer.js"]
+    command: ["npx", "tsx", "src/consumer/main.ts"]
     depends_on:
       - nats
       - postgres

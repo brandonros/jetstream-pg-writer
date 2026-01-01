@@ -1,4 +1,4 @@
-import { connect, NatsConnection, JetStreamClient, JetStreamManager, StringCodec } from 'nats';
+import { connect, NatsConnection, JetStreamClient, StringCodec } from 'nats';
 import { WriteRequest, WriteResponse } from '../shared/types';
 
 const sc = StringCodec();
@@ -8,7 +8,9 @@ class Producer {
   private js!: JetStreamClient;
 
   async connect() {
-    this.nc = await connect({ servers: 'localhost:4222' });
+    const natsUrl = process.env.NATS_URL || 'nats://localhost:4222';
+    
+    this.nc = await connect({ servers: natsUrl });
     this.js = this.nc.jetstream();
 
     // Ensure stream exists
@@ -21,21 +23,19 @@ class Producer {
     } catch (e) {
       // Stream already exists, that's fine
     }
+    
+    console.log(`Producer connected to ${natsUrl}`);
   }
 
   async queueWrite(request: WriteRequest, timeoutMs = 30000): Promise<WriteResponse> {
     const replySubject = this.nc.newInbox();
-    
-    // Subscribe to reply BEFORE publishing
     const sub = this.nc.subscribe(replySubject, { max: 1 });
 
-    // Publish to JetStream with reply subject in header
     await this.js.publish(`writes.${request.table}`, sc.encode(JSON.stringify(request)), {
       headers: new Map([['Reply-To', replySubject]]) as any,
-      msgID: request.operationId,  // JetStream dedup - prevents duplicate publish
+      msgID: request.operationId,
     });
 
-    // Wait for consumer's reply
     const timeout = setTimeout(() => sub.drain(), timeoutMs);
     
     for await (const msg of sub) {
@@ -51,13 +51,12 @@ class Producer {
   }
 }
 
-// Usage
 async function main() {
   const producer = new Producer();
   await producer.connect();
 
   const result = await producer.queueWrite({
-    operationId: crypto.randomUUID(),  // Caller generates idempotency key
+    operationId: crypto.randomUUID(),
     table: 'users',
     data: { name: 'Alice', email: 'alice@example.com' },
   });
