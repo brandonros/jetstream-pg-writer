@@ -1,0 +1,20 @@
+{
+  "name": "@jetstream-pg-writer/producer",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@jetstream-pg-writer/shared": "workspace:*",
+    "fastify": "^5.0.0",
+    "nats": "^2.28.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
