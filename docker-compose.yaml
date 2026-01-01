@@ -53,10 +53,34 @@ services:
       nats:
         condition: service_started
     volumes:
-      - ./config/debezium:/debezium/conf
       - debezium-data:/debezium/data
     environment:
+      # Sink: NATS JetStream
+      DEBEZIUM_SINK_TYPE: nats-jetstream
+      DEBEZIUM_SINK_NATS_JETSTREAM_URL: nats://nats:4222
+      DEBEZIUM_SINK_NATS_JETSTREAM_CREATE_STREAM: "true"
+      # Source: PostgreSQL
+      DEBEZIUM_SOURCE_CONNECTOR_CLASS: io.debezium.connector.postgresql.PostgresConnector
+      DEBEZIUM_SOURCE_OFFSET_STORAGE_FILE_FILENAME: data/offsets.dat
+      DEBEZIUM_SOURCE_OFFSET_FLUSH_INTERVAL_MS: "0"
       DEBEZIUM_SOURCE_DATABASE_HOSTNAME: postgres
+      DEBEZIUM_SOURCE_DATABASE_PORT: "5432"
+      DEBEZIUM_SOURCE_DATABASE_USER: jetstream
+      DEBEZIUM_SOURCE_DATABASE_PASSWORD: jetstream
+      DEBEZIUM_SOURCE_DATABASE_DBNAME: jetstream
+      DEBEZIUM_SOURCE_PLUGIN_NAME: pgoutput
+      DEBEZIUM_SOURCE_TOPIC_PREFIX: cdc
+      DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST: public.users,public.orders
+      DEBEZIUM_SOURCE_SLOT_NAME: debezium_slot
+      # Transforms
+      DEBEZIUM_TRANSFORMS: unwrap
+      DEBEZIUM_TRANSFORMS_UNWRAP_TYPE: io.debezium.transforms.ExtractNewRecordState
+      DEBEZIUM_TRANSFORMS_UNWRAP_DROP_TOMBSTONES: "true"
+      DEBEZIUM_TRANSFORMS_UNWRAP_DELETE_HANDLING_MODE: rewrite
+      DEBEZIUM_TRANSFORMS_UNWRAP_ADD_FIELDS: op,table,source.ts_ms
+      # Format
+      DEBEZIUM_FORMAT_KEY: json
+      DEBEZIUM_FORMAT_VALUE: json
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8080/q/health/ready || exit 1"]
       interval: 5s
