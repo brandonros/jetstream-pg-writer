@@ -31,6 +31,15 @@ terraform apply
 
 Provisions a Vultr instance with Docker, clones the repo, and starts services via systemd + cloud-init.
 
+## Update
+
+```bash
+ssh user@<server-ip>
+cd ~/jetstream-pg-writer
+git pull
+sudo systemctl restart jetstream-pg-writer
+```
+
 ## Dev
 
 ```bash
