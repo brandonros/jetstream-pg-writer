@@ -42,8 +42,14 @@ users:
       - ${ssh_authorized_key}
 
 runcmd:
+  # Enable unattended-upgrades
   - [ sh, -c, "systemctl enable --now unattended-upgrades" ]
+
+  # Enable fail2ban
   - [ sh, -c, "systemctl enable --now fail2ban" ]
+
+  # Install systemctl-tui
+  - [ sh, -c, "curl https://raw.githubusercontent.com/rgwood/systemctl-tui/master/install.sh | bash" ]
 
 %{ if install_docker ~}
   # Remove old docker packages (ignore errors if not present)
@@ -60,16 +66,23 @@ runcmd:
   - [ sh, -c, "apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin" ]
   - [ sh, -c, "systemctl enable --now docker" ]
   - [ sh, -c, "usermod -aG docker user" ]
+
+  # Install lazydocker
+  - [ sh, -c, "curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | bash" ]
 %{ endif ~}
 
 %{ if deploy_app ~}
+  # clone from git
   - [ sh, -c, "git clone https://github.com/brandonros/jetstream-pg-writer.git /home/user/jetstream-pg-writer" ]
   - [ sh, -c, "chown -R user:user /home/user/jetstream-pg-writer" ]
+
+  # add systemd service
   - [ sh, -c, "install -m 644 /home/user/jetstream-pg-writer/systemd/jetstream-pg-writer.service /etc/systemd/system/" ]
   - [ sh, -c, "systemctl daemon-reload" ]
   - [ sh, -c, "systemctl enable --now jetstream-pg-writer" ]
 %{ endif ~}
 
+  # Enable ufw
   - [ sh, -c, "ufw default deny incoming" ]
   - [ sh, -c, "ufw default allow outgoing" ]
   - [ sh, -c, "ufw allow 22/tcp" ]

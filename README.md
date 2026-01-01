@@ -35,11 +35,12 @@ Provisions a Vultr instance with Docker, clones the repo, and starts services vi
 
 ```bash
 # Infrastructure only
-docker compose up nats postgres
+docker compose up nats postgres redis
 
-# Run services locally (3 terminals)
+# Run services locally (4 terminals)
 pnpm dev:consumer
 pnpm dev:producer
+pnpm dev:reader
 pnpm dev:frontend
 ```
 
@@ -50,6 +51,7 @@ packages/
   shared/     # Types
   producer/   # Fastify API → publishes to JetStream
   consumer/   # JetStream → Postgres
+  reader/     # Fastify API → reads from Redis/Postgres
   frontend/   # React UI
 ```
 

@@ -10,6 +10,7 @@ services:
     command: ["nats-server", "--config", "/nats-server.conf"]
 
   postgres:
+    # postgres 18 was releated on 2025-09-25
     image: postgres:18-alpine
     restart: always
     shm_size: 256mb
@@ -23,6 +24,15 @@ services:
       - ./schema/migrations:/docker-entrypoint-initdb.d/migrations
     ports:
       - "127.0.0.1:5432:5432"
+
+  redis:
+    image: redis:8-alpine
+    restart: always
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
 
   producer:
     build:
@@ -47,6 +57,20 @@ services:
       NATS_URL: nats://nats:4222
       DATABASE_URL: postgres://jetstream:jetstream@postgres:5432/jetstream
 
+  reader:
+    build:
+      context: .
+      dockerfile: packages/reader/Dockerfile
+    ports:
+      - "3001:3001"
+    depends_on:
+      - redis
+      - postgres
+    environment:
+      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgres://jetstream:jetstream@postgres:5432/jetstream
+      PORT: "3001"
+
   frontend:
     build:
       context: .
@@ -55,7 +79,9 @@ services:
       - "80:80"
     depends_on:
       - producer
+      - reader
 
 volumes:
   nats-data:
   postgres-data:
+  redis-data:
