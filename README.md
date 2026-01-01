@@ -9,6 +9,8 @@ HTTP client wants synchronous confirmation that a write succeeded, but we also w
 ```
 Client ──▶ Producer (HTTP) ──▶ JetStream ──▶ Consumer ──▶ Postgres
                 ◀───────────────────────────────────◀──── reply
+
+Postgres WAL ──▶ Debezium ──▶ JetStream ──▶ Reader ──▶ Redis invalidation
 ```
 
 ## Run locally
@@ -44,7 +46,7 @@ sudo systemctl restart jetstream-pg-writer
 
 ```bash
 # Infrastructure only
-docker compose up nats postgres redis
+docker compose up nats postgres redis debezium
 
 # Run services locally (4 terminals)
 pnpm dev:consumer
@@ -64,9 +66,25 @@ packages/
   frontend/   # React UI
 ```
 
+## Cache invalidation (CDC)
+
+Debezium Server connects to Postgres logical replication and streams WAL changes to NATS JetStream.
+
+```
+config/debezium/application.properties  # Debezium config
+```
+
+- **Source**: Postgres with `wal_level=logical`
+- **Sink**: NATS JetStream (`DebeziumStream`)
+- **Tables**: `public.users`, `public.orders`
+- **Events**: Published to `cdc.public.users`, `cdc.public.orders`
+
+The reader creates a durable JetStream consumer and invalidates Redis keys when CDC events arrive. This captures ALL changes (application writes, migrations, manual SQL) without requiring manual invalidation code.
+
 ## Key design decisions
 
 - **operationId = entity id** — The idempotency key becomes the primary key. No separate tracking table needed.
 - **PK constraint = idempotency** — Duplicate inserts fail with unique violation, treated as success.
 - **Filtered consumers** — Each table has its own JetStream consumer (`users-writer`, `orders-writer`).
 - **FK enforced** — Orders require valid user_id. Frontend tracks created users.
+- **Cache invalidation via CDC** — Debezium captures Postgres WAL changes and publishes to JetStream. Reader consumes CDC events and invalidates Redis keys. No manual invalidation code needed.

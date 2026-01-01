@@ -80,7 +80,7 @@ export abstract class BaseHandler<T> {
   private async processWrite(operationId: string, data: T): Promise<boolean> {
     try {
       await this.insert(this.db, operationId, data);
-      this.publishInvalidation(data);
+      // Cache invalidation now handled by Debezium CDC → JetStream → reader
       return true;
     } catch (error) {
       // PK/unique violation means duplicate - treat as success
@@ -89,12 +89,6 @@ export abstract class BaseHandler<T> {
       }
       throw error;
     }
-  }
-
-  private publishInvalidation(data: T): void {
-    const payload = { table: this.table, data };
-    this.nc.publish('cache.invalidate', sc.encode(JSON.stringify(payload)));
-    console.log(`[${this.table}] Published cache invalidation`);
   }
 
   protected abstract insert(db: pg.Pool, operationId: string, data: T): Promise<void>;

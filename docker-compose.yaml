@@ -14,6 +14,7 @@ services:
     image: postgres:18-alpine
     restart: always
     shm_size: 256mb
+    command: ["postgres", "-c", "wal_level=logical"]
     environment:
       POSTGRES_USER: jetstream
       POSTGRES_PASSWORD: jetstream
@@ -33,6 +34,18 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "127.0.0.1:6379:6379"
+
+  debezium:
+    image: quay.io/debezium/server:3.0
+    depends_on:
+      - postgres
+      - nats
+    volumes:
+      - ./config/debezium:/debezium/conf
+      - debezium-data:/debezium/data
+    environment:
+      # Give Postgres time to start and run migrations
+      DEBEZIUM_SOURCE_DATABASE_HOSTNAME: postgres
 
   producer:
     build:
@@ -87,3 +100,4 @@ volumes:
   nats-data:
   postgres-data:
   redis-data:
+  debezium-data:
