@@ -163,6 +163,7 @@ export function App() {
             <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}>
+                  <th>ID</th>
                   <th>Name</th>
                   <th>Email</th>
                 </tr>
@@ -170,6 +171,7 @@ export function App() {
               <tbody>
                 {users.map((user) => (
                   <tr key={user.id} style={{ borderBottom: '1px solid #eee' }}>
+                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{user.id.slice(0, 8)}</td>
                     <td>{user.name}</td>
                     <td>{user.email}</td>
                   </tr>
@@ -187,6 +189,7 @@ export function App() {
             <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}>
+                  <th>ID</th>
                   <th>User</th>
                   <th>Total</th>
                   <th>Items</th>
@@ -195,6 +198,7 @@ export function App() {
               <tbody>
                 {orders.map((order) => (
                   <tr key={order.id} style={{ borderBottom: '1px solid #eee' }}>
+                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{order.id.slice(0, 8)}</td>
                     <td>{getUserName(order.user_id)}</td>
                     <td>${order.total}</td>
                     <td>{order.items.length} item(s)</td>
