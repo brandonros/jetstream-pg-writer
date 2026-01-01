@@ -72,5 +72,6 @@ runcmd:
 
   - [ sh, -c, "ufw default deny incoming" ]
   - [ sh, -c, "ufw default allow outgoing" ]
-  - [ sh, -c, "ufw allow OpenSSH" ]
+  - [ sh, -c, "ufw allow 22/tcp" ]
+  - [ sh, -c, "ufw allow 80/tcp" ]
   - [ sh, -c, "ufw --force enable" ]
