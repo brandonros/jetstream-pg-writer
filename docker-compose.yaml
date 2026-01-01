@@ -47,6 +47,15 @@ services:
       NATS_URL: nats://nats:4222
       DATABASE_URL: postgres://jetstream:jetstream@postgres:5432/jetstream
 
+  frontend:
+    build:
+      context: .
+      dockerfile: packages/frontend/Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - producer
+
 volumes:
   nats-data:
   postgres-data:
