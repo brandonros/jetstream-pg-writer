@@ -14,17 +14,6 @@ export class WriteClient {
     this.nc = await connect({ servers: natsUrl });
     this.js = this.nc.jetstream();
 
-    // Ensure stream exists
-    const jsm = await this.nc.jetstreamManager();
-    try {
-      await jsm.streams.add({
-        name: 'WRITES',
-        subjects: ['writes.>'],
-      });
-    } catch {
-      // Stream already exists
-    }
-
     this.connected = true;
     console.log(`WriteClient connected to ${natsUrl}`);
   }

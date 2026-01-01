@@ -27,7 +27,7 @@ resource "vultr_instance" "server1" {
   region = "atl"
   os_id  = 2136               # bookworm
   hostname = "server1"
-  user_data = templatefile("${path.module}/../cloud-config.yaml.tpl", {
+  user_data = templatefile("${path.module}/cloud-config.yaml.tpl", {
     install_docker        = local.install_docker
     deploy_app            = local.deploy_app
     ssh_authorized_key = local.ssh_authorized_key

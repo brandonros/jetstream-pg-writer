@@ -1,6 +1,6 @@
 export interface WriteRequest {
   operationId: string;
-  table: string;
+  table: SupportedTable;
   data: Record<string, unknown>;
 }
 

@@ -7,6 +7,8 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+Restart=on-failure
+RestartSec=10
 WorkingDirectory=/home/user/jetstream-pg-writer
 ExecStart=/usr/bin/docker compose up --build --detach
 ExecStop=/usr/bin/docker compose down
