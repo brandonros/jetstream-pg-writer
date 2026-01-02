@@ -1,3 +1,34 @@
+import { z } from 'zod/v4';
+
+// Input schemas (what clients send to create entities)
+export const OrderItemSchema = z.object({
+  productId: z.string(),
+  quantity: z.number().int().positive(),
+  price: z.number().positive(),
+});
+
+export const UserDataSchema = z.object({
+  name: z.string().min(1),
+  email: z.email(),
+});
+
+export const OrderDataSchema = z.object({
+  userId: z.string().min(1),
+  items: z.array(OrderItemSchema).min(1),
+  total: z.number().positive(),
+});
+
+// Derive types from schemas (no duplication!)
+export type OrderItem = z.infer<typeof OrderItemSchema>;
+export type UserData = z.infer<typeof UserDataSchema>;
+export type OrderData = z.infer<typeof OrderDataSchema>;
+
+export type TableDataMap = {
+  users: UserData;
+  orders: OrderData;
+};
+
+// Internal types (not validated via HTTP)
 export interface WriteRequest {
   operationId: string;
   table: SupportedTable;
@@ -12,29 +43,6 @@ export interface WriteResponse {
 }
 
 export type SupportedTable = 'users' | 'orders';
-
-// Input types (what clients send to create entities)
-export interface UserData {
-  name: string;
-  email: string;
-}
-
-export interface OrderData {
-  userId: string;
-  items: OrderItem[];
-  total: number;
-}
-
-export interface OrderItem {
-  productId: string;
-  quantity: number;
-  price: number;
-}
-
-export type TableDataMap = {
-  users: UserData;
-  orders: OrderData;
-};
 
 // Row types (what the database returns)
 export interface UserRow {

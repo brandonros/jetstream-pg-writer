@@ -53,14 +53,17 @@ async function setupCdcConsumer({ nc, js, log }: Omit<CdcConsumerOptions, 'redis
     await jsm.consumers.add(streamName, {
       durable_name: consumerName,
       ack_policy: AckPolicy.Explicit,
-      deliver_policy: DeliverPolicy.New,
+      deliver_policy: DeliverPolicy.All, // Process all events from stream start
       filter_subjects: ['cdc.public.users', 'cdc.public.orders'],
+      idle_heartbeat: 5_000_000_000, // 5s - detect stalled consumers
+      flow_control: true, // Backpressure support for horizontal scaling
     });
-    log.info(`Created CDC consumer: ${consumerName}`);
+    log.info({ consumer: consumerName }, 'Created CDC consumer');
   } catch (err: unknown) {
     if (err instanceof Error && !err.message.includes('already exists')) {
       throw err;
     }
+    log.info({ consumer: consumerName }, 'CDC consumer already exists');
   }
 
   const consumer = await js.consumers.get(streamName, consumerName);

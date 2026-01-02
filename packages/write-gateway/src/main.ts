@@ -1,14 +1,20 @@
 import Fastify from 'fastify';
+import { serializerCompiler, validatorCompiler, ZodTypeProvider } from 'fastify-type-provider-zod';
 import { createLogger } from '@jetstream-pg-writer/shared/logger';
 import { WriteClient } from './client.js';
-import type { UserData, OrderData } from '@jetstream-pg-writer/shared';
+import { UserDataSchema, OrderDataSchema } from '@jetstream-pg-writer/shared';
 
 const log = createLogger('write-gateway');
 const fastify = Fastify({ logger: log });
+
+fastify.setValidatorCompiler(validatorCompiler);
+fastify.setSerializerCompiler(serializerCompiler);
+
+const app = fastify.withTypeProvider<ZodTypeProvider>();
 const writeClient = new WriteClient(log);
 
 // Health check
-fastify.get('/health', async () => {
+app.get('/health', async () => {
   return {
     status: 'ok',
     nats: writeClient.isConnected(),
@@ -16,18 +22,15 @@ fastify.get('/health', async () => {
 });
 
 // Create user
-fastify.post<{ Body: UserData }>('/users', async (request, reply) => {
+app.post('/users', {
+  schema: { body: UserDataSchema },
+}, async (request, reply) => {
   const idempotencyKey = request.headers['idempotency-key'];
   if (!idempotencyKey || typeof idempotencyKey !== 'string') {
     return reply.status(400).send({ error: 'Idempotency-Key header is required' });
   }
 
   const { name, email } = request.body;
-
-  if (!name || !email) {
-    return reply.status(400).send({ error: 'name and email are required' });
-  }
-
   const result = await writeClient.write('users', { name, email }, idempotencyKey);
 
   if (result.success) {
@@ -42,18 +45,15 @@ fastify.post<{ Body: UserData }>('/users', async (request, reply) => {
 });
 
 // Create order
-fastify.post<{ Body: OrderData }>('/orders', async (request, reply) => {
+app.post('/orders', {
+  schema: { body: OrderDataSchema },
+}, async (request, reply) => {
   const idempotencyKey = request.headers['idempotency-key'];
   if (!idempotencyKey || typeof idempotencyKey !== 'string') {
     return reply.status(400).send({ error: 'Idempotency-Key header is required' });
   }
 
   const { userId, items, total } = request.body;
-
-  if (!userId || !items || total === undefined) {
-    return reply.status(400).send({ error: 'userId, items, and total are required' });
-  }
-
   const result = await writeClient.write('orders', { userId, items, total }, idempotencyKey);
 
   if (result.success) {
