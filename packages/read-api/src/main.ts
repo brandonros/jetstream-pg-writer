@@ -59,37 +59,47 @@ fastify.get('/health', async (_, reply) => {
   });
 });
 
-fastify.get('/users', async () => {
-  const users = await getCached<UserRow[]>('users:all', async () => {
+fastify.get<{ Querystring: { limit?: string; offset?: string } }>('/users', async (request) => {
+  const limit = Math.min(parseInt(request.query.limit || '100', 10), 1000);
+  const offset = parseInt(request.query.offset || '0', 10);
+  const cacheKey = `users:limit:${limit}:offset:${offset}`;
+
+  const users = await getCached<UserRow[]>(cacheKey, async () => {
     const result = await db.query<UserRow>(
-      'SELECT user_id, name, email, created_at FROM users ORDER BY created_at DESC'
+      'SELECT user_id, name, email, created_at FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2',
+      [limit, offset]
     );
     return result.rows;
   });
 
-  return { users };
+  return { users, limit, offset };
 });
 
-fastify.get<{ Querystring: { userId?: string } }>('/orders', async (request) => {
+fastify.get<{ Querystring: { userId?: string; limit?: string; offset?: string } }>('/orders', async (request) => {
   const { userId } = request.query;
-  const cacheKey = userId ? `orders:user:${userId}` : 'orders:all';
+  const limit = Math.min(parseInt(request.query.limit || '100', 10), 1000);
+  const offset = parseInt(request.query.offset || '0', 10);
+  const cacheKey = userId
+    ? `orders:user:${userId}:limit:${limit}:offset:${offset}`
+    : `orders:limit:${limit}:offset:${offset}`;
 
   const orders = await getCached<OrderRow[]>(cacheKey, async () => {
     if (userId) {
       const result = await db.query<OrderRow>(
-        'SELECT order_id, user_id, items, total, created_at FROM orders WHERE user_id = $1 ORDER BY created_at DESC',
-        [userId]
+        'SELECT order_id, user_id, items, total, created_at FROM orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',
+        [userId, limit, offset]
       );
       return result.rows;
     }
 
     const result = await db.query<OrderRow>(
-      'SELECT order_id, user_id, items, total, created_at FROM orders ORDER BY created_at DESC'
+      'SELECT order_id, user_id, items, total, created_at FROM orders ORDER BY created_at DESC LIMIT $1 OFFSET $2',
+      [limit, offset]
     );
     return result.rows;
   });
 
-  return { orders };
+  return { orders, limit, offset };
 });
 
 async function main() {
