@@ -8,6 +8,11 @@ export function App() {
   const [selectedUserId, setSelectedUserId] = useState<string>('');
   const [loading, setLoading] = useState(false);
 
+  // Idempotency keys are generated once and reused for retries.
+  // Only regenerated after a successful operation to allow the next create.
+  const [userIdempotencyKey, setUserIdempotencyKey] = useState(() => crypto.randomUUID());
+  const [orderIdempotencyKey, setOrderIdempotencyKey] = useState(() => crypto.randomUUID());
+
   const addResult = (msg: string) => {
     setResults((prev) => [...prev, `${new Date().toLocaleTimeString()}: ${msg}`]);
   };
@@ -41,7 +46,7 @@ export function App() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Idempotency-Key': crypto.randomUUID(),
+          'Idempotency-Key': userIdempotencyKey,
         },
         body: JSON.stringify({
           name: `User ${Math.floor(Math.random() * 1000)}`,
@@ -51,15 +56,16 @@ export function App() {
       const data = await res.json();
       if (data.userId) {
         addResult(`User created: ${data.userId}`);
+        setUserIdempotencyKey(crypto.randomUUID()); // New key for next user
         await fetchData();
         if (!selectedUserId) {
           setSelectedUserId(data.userId);
         }
       } else {
-        addResult(`Error: ${data.error}`);
+        addResult(`Error: ${data.error} (retry will use same idempotency key)`);
       }
     } catch (err) {
-      addResult(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      addResult(`Error: ${err instanceof Error ? err.message : 'Unknown error'} (retry will use same idempotency key)`);
     } finally {
       setLoading(false);
     }
@@ -77,7 +83,7 @@ export function App() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Idempotency-Key': crypto.randomUUID(),
+          'Idempotency-Key': orderIdempotencyKey,
         },
         body: JSON.stringify({
           userId: selectedUserId,
@@ -88,12 +94,13 @@ export function App() {
       const data = await res.json();
       if (data.orderId) {
         addResult(`Order created: ${data.orderId} (for user ${selectedUserId.slice(0, 8)}...)`);
+        setOrderIdempotencyKey(crypto.randomUUID()); // New key for next order
         await fetchData();
       } else {
-        addResult(`Error: ${data.error}`);
+        addResult(`Error: ${data.error} (retry will use same idempotency key)`);
       }
     } catch (err) {
-      addResult(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      addResult(`Error: ${err instanceof Error ? err.message : 'Unknown error'} (retry will use same idempotency key)`);
     } finally {
       setLoading(false);
     }
