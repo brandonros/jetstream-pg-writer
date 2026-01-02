@@ -22,6 +22,8 @@ const CACHE_TTL_SECONDS = 30;
  * - Silently falling back to Postgres would mask infrastructure issues
  * - Health check already reports Redis status for alerting
  * - If Redis-optional behavior is needed, wrap calls in try/catch with metrics
+ * NOTE: Assumes single Postgres instance. Read replicas would require
+ * cache cooldown or primary reads on cache miss to avoid caching stale data.
  */
 async function getCached<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
   const cached = await redis.get(key);

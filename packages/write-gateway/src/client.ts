@@ -82,4 +82,35 @@ export class WriteClient {
   isConnected() {
     return this.connected;
   }
+
+  async healthCheck(): Promise<boolean> {
+    if (!this.connected) return false;
+    try {
+      const jsm = await this.nc.jetstreamManager();
+      await jsm.streams.info('WRITES');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Returns pending message count in the WRITES stream.
+   * Used for backpressure: reject new writes when queue is too deep.
+   *
+   * TRADEOFF: This is a point-in-time snapshot, not a reservation.
+   * Under high concurrency, multiple requests may pass the check simultaneously
+   * before any are processed. For true backpressure, use JetStream's
+   * max_ack_pending on the consumer side. This is defense-in-depth.
+   */
+  async getQueueDepth(): Promise<number> {
+    if (!this.connected) return 0;
+    try {
+      const jsm = await this.nc.jetstreamManager();
+      const stream = await jsm.streams.info('WRITES');
+      return stream.state.messages;
+    } catch {
+      return 0; // Can't check, assume healthy
+    }
+  }
 }
