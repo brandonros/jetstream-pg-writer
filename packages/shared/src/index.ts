@@ -44,6 +44,17 @@ export interface WriteResponse {
 
 export type SupportedTable = 'users' | 'orders';
 
+// Async operation status types
+export type OperationStatus = 'pending' | 'completed' | 'failed';
+
+export interface OperationStatusResponse {
+  status: OperationStatus;
+  operationId: string;
+  table?: SupportedTable;
+  entityId?: string;
+  error?: string;
+}
+
 // Row types (what the database returns)
 export interface UserRow {
   user_id: string;

@@ -1,17 +1,21 @@
 # jetstream-pg-writer
 
-Request/reply pattern through NATS JetStream with idempotent Postgres writes.
+Async writes through NATS JetStream with idempotent Postgres writes and client polling.
 
 ## Why
 
-HTTP client wants synchronous confirmation that a write succeeded, but we also want durability and decoupling. Solution: publish to JetStream with a reply inbox, consumer writes to Postgres and replies.
+HTTP client wants durable writes with eventual confirmation. Solution: publish to JetStream (fire-and-forget), consumer writes to Postgres and updates status, client polls for completion.
 
 ```
 Client ──▶ write-gateway ──▶ JetStream ──▶ write-processor ──▶ Postgres
-                  ◀─────────────────────────────────◀──── reply
+   │           │ (202 pending)                    │ (updates status)
+   │           ▼                                  │
+   └────▶ poll /status/:id ◀── read-api ◀─────────┘
 
 Postgres WAL ──▶ Debezium ──▶ JetStream ──▶ read-api ──▶ Redis invalidation
 ```
+
+This gives true durability: if the processor is down, messages queue in JetStream and complete when it recovers. The client can poll indefinitely (or timeout and retry later with the same idempotency key).
 
 ## Quick start
 
@@ -51,9 +55,9 @@ Debezium Server connects to Postgres logical replication and streams WAL changes
 
 The read-api creates a durable JetStream consumer and invalidates Redis keys when CDC events arrive. This captures ALL changes (application writes, migrations, manual SQL) without requiring manual invalidation code.
 
-## Idempotency
+## Idempotency & Status Tracking
 
-Writes are idempotent via a `write_operations` table:
+Writes are idempotent via a `write_operations` table that also tracks async status:
 
 ```sql
 CREATE TABLE write_operations (
@@ -61,23 +65,28 @@ CREATE TABLE write_operations (
   entity_table TEXT NOT NULL,
   entity_id UUID NOT NULL,
   op_type TEXT NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  status TEXT NOT NULL DEFAULT 'pending',  -- pending, completed, failed
+  error TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  completed_at TIMESTAMPTZ
 );
 ```
 
 Flow:
-1. Client sends write request with `operationId`
-2. write-processor attempts `INSERT INTO write_operations` (idempotency check)
-3. If duplicate → return existing `entity_id` (idempotent success)
-4. If new → insert domain row, invalidate cache, return new `entity_id`
-5. All operations in same transaction (except cache invalidation)
+1. Client sends write request with `operationId` (Idempotency-Key header)
+2. write-gateway publishes to JetStream, returns `{ status: "pending", operationId }`
+3. write-processor inserts `write_operations` with status='pending' (idempotency check)
+4. If duplicate → skip (already processed or in progress)
+5. If new → insert domain row, update status='completed', invalidate cache
+6. Client polls `/status/:operationId` until completed/failed/timeout
 
-This separates transport concerns (idempotency) from domain concerns (entity IDs).
+This separates transport concerns (idempotency, async status) from domain concerns (entity IDs).
 
 ## Key design decisions
 
-- **Separate operation_id from entity_id** — `write_operations` table tracks idempotency. Domain tables use natural IDs (`user_id`, `order_id`).
-- **Transaction-based idempotency** — Idempotency check and domain write in same transaction. No CDC waiting.
+- **Async with polling** — Gateway returns immediately (202), client polls for completion. True durability: processor downtime = queued messages, not lost writes.
+- **Separate operation_id from entity_id** — `write_operations` table tracks idempotency and status. Domain tables use natural IDs (`user_id`, `order_id`).
+- **Transaction-based idempotency** — Idempotency check and domain write in same transaction. Status updated atomically.
 - **Filtered consumers** — Each table has its own JetStream consumer (`users-writer`, `orders-writer`).
 - **FK enforced** — Orders require valid user_id. Frontend tracks created users.
 - **Cache invalidation via CDC** — Debezium captures Postgres WAL changes and publishes to JetStream. Reader consumes CDC events and invalidates Redis keys. Eventually consistent.
@@ -87,6 +96,5 @@ This separates transport concerns (idempotency) from domain concerns (entity IDs
 This is a proof-of-concept for learning, not a production template.
 
 - **Complexity vs. scale mismatch** — Two CRUD tables don't need NATS, Debezium, and Redis. A direct HTTP→Postgres write would be simpler with identical semantics for this workload.
-- **Sync-over-async** — The request-reply pattern blocks waiting for a response, so JetStream durability doesn't help when the processor is down (client times out anyway).
 - **No cleanup** — The `write_operations` table grows forever.
 - **Redis required** — Read path fails completely if Redis is down; no fallback to Postgres.

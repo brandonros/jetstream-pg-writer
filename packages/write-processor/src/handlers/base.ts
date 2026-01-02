@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { JetStreamClient, JsMsg, StringCodec, NatsConnection } from 'nats';
 import pg from 'pg';
 import type { Redis } from 'ioredis';
-import type { WriteRequest, WriteResponse } from '@jetstream-pg-writer/shared';
+import type { WriteRequest } from '@jetstream-pg-writer/shared';
 import type { Logger } from '@jetstream-pg-writer/shared/logger';
 import { deleteByPattern } from '@jetstream-pg-writer/shared/cache';
 
@@ -10,10 +10,6 @@ const sc = StringCodec();
 
 // Postgres error code for unique_violation
 const PG_UNIQUE_VIOLATION = '23505';
-
-export interface InsertResult {
-  entityId: string;
-}
 
 export abstract class BaseHandler<T> {
   protected js: JetStreamClient;
@@ -46,98 +42,45 @@ export abstract class BaseHandler<T> {
 
   private async handleMessage(msg: JsMsg) {
     const request: WriteRequest = JSON.parse(sc.decode(msg.data));
-    const replyTo = msg.headers?.get('Reply-To');
 
     this.log.info({ table: this.table, operationId: request.operationId }, 'Processing write');
 
-    let response: WriteResponse;
-    let shouldAck = true;
-
     try {
-      const result = await this.processWrite(request.operationId, request.data as T);
-
-      response = {
-        success: true,
-        operationId: request.operationId,
-        entityId: result.entityId,
-      };
-
-      if (result.entityId) {
-        this.log.info({ table: this.table, operationId: request.operationId, entityId: result.entityId }, 'Write completed');
-      } else {
-        this.log.info({ table: this.table, operationId: request.operationId }, 'Duplicate skipped');
-      }
-    } catch (error) {
-      const errMsg = error instanceof Error ? error.message : 'Unknown error';
-      this.log.error({ table: this.table, operationId: request.operationId, err: errMsg }, 'Write failed');
-
-      response = {
-        success: false,
-        operationId: request.operationId,
-        error: errMsg,
-      };
-
-      // TRADEOFF: No Dead Letter Queue. After max_deliver (3 retries), messages are dropped.
-      // This is acceptable because:
-      // - Writes block until ack'd - client already knows if their write failed
-      // - DLQ would store failures that clients already received error responses for
-      // - Non-retryable errors (constraint violations, bad data) aren't worth retrying anyway
-      // - Retryable errors (connection issues) usually succeed on retry
-      //
-      // If async writes are added later, implement DLQ for undeliverable messages.
-      shouldAck = !this.isRetryable(error);
-    }
-
-    // Reply BEFORE ack/nak. If we crash after reply but before ack:
-    // - Client got confirmation (good)
-    // - JetStream redelivers (no ack received)
-    // - Idempotency check returns existing entity_id
-    // - Duplicate reply sent (harmless - same content, client may have timed out anyway)
-    //
-    // If we ack'd first and crashed before reply:
-    // - Write succeeded, message won't redeliver
-    // - Client never learns outcome, times out, may retry with new idempotency key
-    // - That's the bug we're avoiding.
-    if (replyTo) {
-      this.nc.publish(replyTo, sc.encode(JSON.stringify(response)));
-    }
-
-    if (shouldAck) {
+      await this.processWrite(request.operationId, request.data as T);
       msg.ack();
-    } else {
-      msg.nak();
+    } catch (error) {
+      // Retryable errors (connection, timeout) → nak for retry
+      // Non-retryable errors (constraint violations) → ack (failure already recorded in DB)
+      if (this.isRetryable(error)) {
+        this.log.warn({ table: this.table, operationId: request.operationId, err: error }, 'Retryable error, will retry');
+        msg.nak();
+      } else {
+        this.log.error({ table: this.table, operationId: request.operationId, err: error }, 'Non-retryable error, failure recorded');
+        msg.ack();
+      }
     }
   }
 
-  private async processWrite(operationId: string, data: T): Promise<{ entityId: string }> {
+  private async processWrite(operationId: string, data: T): Promise<void> {
+    const entityId = randomUUID();
     const client = await this.db.connect();
 
     try {
       await client.query('BEGIN');
 
-      // Generate entity ID
-      const entityId = randomUUID();
-
-      // 1. Idempotency check - insert into write_operations first
+      // 1. Idempotency check - insert with status='pending'
       try {
         await client.query(
-          `INSERT INTO write_operations (operation_id, entity_table, entity_id, op_type)
-           VALUES ($1, $2, $3, $4)`,
-          [operationId, this.table, entityId, 'create']
+          `INSERT INTO write_operations (operation_id, entity_table, entity_id, op_type, status)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [operationId, this.table, entityId, 'create', 'pending']
         );
       } catch (error) {
         await client.query('ROLLBACK');
-        // Duplicate operation - look up existing entity_id
+        // Duplicate operation - already processed (or in progress)
         if (error instanceof Error && 'code' in error && error.code === PG_UNIQUE_VIOLATION) {
-          const existing = await client.query<{ entity_id: string }>(
-            'SELECT entity_id FROM write_operations WHERE operation_id = $1',
-            [operationId]
-          );
-          const entityId = existing.rows[0]?.entity_id;
-          if (!entityId) {
-            throw new Error(`Idempotency record not found for operation ${operationId}`);
-          }
-          return { entityId };
+          this.log.info({ table: this.table, operationId }, 'Duplicate operation, skipping');
+          return;
         }
         throw error;
       }
@@ -145,28 +88,48 @@ export abstract class BaseHandler<T> {
       // 2. Perform the actual domain insert
       await this.insert(client, entityId, data);
 
-      await client.query('COMMIT');
+      // 3. Mark as completed
+      await client.query(
+        `UPDATE write_operations SET status = $1, completed_at = NOW() WHERE operation_id = $2`,
+        ['completed', operationId]
+      );
 
-      // 3. Invalidate cache synchronously so the client sees their own write immediately.
-      // CDC (read-api) also invalidates cache for external changes (migrations, manual SQL, other services).
-      // Both are needed: sync for read-your-writes consistency, CDC for external consistency.
-      //
-      // Non-fatal: write already committed. If Redis is down:
-      // - Client gets success (write did succeed)
-      // - Cache may be stale until CDC catches up or TTL expires (30s)
+      await client.query('COMMIT');
+      this.log.info({ table: this.table, operationId, entityId }, 'Write completed');
+
+      // 4. Invalidate cache (non-fatal)
       try {
         await this.invalidateCache(entityId, data);
         this.log.info({ table: this.table }, 'Cache invalidated');
       } catch (error) {
         this.log.warn({ table: this.table, err: error }, 'Cache invalidation failed (non-fatal)');
       }
-
-      return { entityId };
     } catch (error) {
       await client.query('ROLLBACK');
+
+      // Record failure for non-retryable errors so client can poll for result
+      if (!this.isRetryable(error)) {
+        const errMsg = error instanceof Error ? error.message : 'Unknown error';
+        await this.recordFailure(operationId, entityId, errMsg);
+      }
+
       throw error;
     } finally {
       client.release();
+    }
+  }
+
+  private async recordFailure(operationId: string, entityId: string, error: string): Promise<void> {
+    try {
+      await this.db.query(
+        `INSERT INTO write_operations (operation_id, entity_table, entity_id, op_type, status, error, completed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())
+         ON CONFLICT (operation_id) DO UPDATE SET status = $5, error = $6, completed_at = NOW()`,
+        [operationId, this.table, entityId, 'create', 'failed', error]
+      );
+      this.log.info({ table: this.table, operationId }, 'Failure recorded');
+    } catch (err) {
+      this.log.error({ table: this.table, operationId, err }, 'Failed to record failure');
     }
   }
 

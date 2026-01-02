@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
-import type { UserRow, OrderRow } from '@jetstream-pg-writer/shared';
+import type { UserRow, OrderRow, OperationStatusResponse } from '@jetstream-pg-writer/shared';
+
+const POLL_INTERVAL_MS = 500;
+const POLL_TIMEOUT_MS = 30000;
 
 export function App() {
   const [results, setResults] = useState<string[]>([]);
@@ -15,6 +18,26 @@ export function App() {
 
   const addResult = (msg: string) => {
     setResults((prev) => [...prev, `${new Date().toLocaleTimeString()}: ${msg}`]);
+  };
+
+  // Poll for operation completion
+  const pollForCompletion = async (operationId: string): Promise<OperationStatusResponse> => {
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < POLL_TIMEOUT_MS) {
+      const res = await fetch(`/api/read/status/${operationId}`);
+      const status: OperationStatusResponse = await res.json();
+
+      if (status.status === 'completed' || status.status === 'failed') {
+        return status;
+      }
+
+      // Wait before next poll
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    }
+
+    // Timeout - return pending status
+    return { status: 'pending', operationId };
   };
 
   const fetchData = async () => {
@@ -42,6 +65,7 @@ export function App() {
   const createUser = async () => {
     setLoading(true);
     try {
+      // Submit write request (returns immediately with pending status)
       const res = await fetch('/api/write/users', {
         method: 'POST',
         headers: {
@@ -54,15 +78,28 @@ export function App() {
         }),
       });
       const data = await res.json();
-      if (data.userId) {
-        addResult(`User created: ${data.userId}`);
+
+      if (data.status !== 'pending') {
+        addResult(`Error: Unexpected response (retry will use same idempotency key)`);
+        return;
+      }
+
+      addResult(`Creating user... (polling for completion)`);
+
+      // Poll for completion
+      const result = await pollForCompletion(data.operationId);
+
+      if (result.status === 'completed' && result.entityId) {
+        addResult(`User created: ${result.entityId}`);
         setUserIdempotencyKey(crypto.randomUUID()); // New key for next user
         await fetchData();
         if (!selectedUserId) {
-          setSelectedUserId(data.userId);
+          setSelectedUserId(result.entityId);
         }
+      } else if (result.status === 'failed') {
+        addResult(`Error: ${result.error} (retry will use same idempotency key)`);
       } else {
-        addResult(`Error: ${data.error} (retry will use same idempotency key)`);
+        addResult(`Timeout: Operation may still complete. Check back later.`);
       }
     } catch (err) {
       addResult(`Error: ${err instanceof Error ? err.message : 'Unknown error'} (retry will use same idempotency key)`);
@@ -79,6 +116,7 @@ export function App() {
 
     setLoading(true);
     try {
+      // Submit write request (returns immediately with pending status)
       const res = await fetch('/api/write/orders', {
         method: 'POST',
         headers: {
@@ -92,12 +130,25 @@ export function App() {
         }),
       });
       const data = await res.json();
-      if (data.orderId) {
-        addResult(`Order created: ${data.orderId} (for user ${selectedUserId.slice(0, 8)}...)`);
+
+      if (data.status !== 'pending') {
+        addResult(`Error: Unexpected response (retry will use same idempotency key)`);
+        return;
+      }
+
+      addResult(`Creating order... (polling for completion)`);
+
+      // Poll for completion
+      const result = await pollForCompletion(data.operationId);
+
+      if (result.status === 'completed' && result.entityId) {
+        addResult(`Order created: ${result.entityId} (for user ${selectedUserId.slice(0, 8)}...)`);
         setOrderIdempotencyKey(crypto.randomUUID()); // New key for next order
         await fetchData();
+      } else if (result.status === 'failed') {
+        addResult(`Error: ${result.error} (retry will use same idempotency key)`);
       } else {
-        addResult(`Error: ${data.error} (retry will use same idempotency key)`);
+        addResult(`Timeout: Operation may still complete. Check back later.`);
       }
     } catch (err) {
       addResult(`Error: ${err instanceof Error ? err.message : 'Unknown error'} (retry will use same idempotency key)`);

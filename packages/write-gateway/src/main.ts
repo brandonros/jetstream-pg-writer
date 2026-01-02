@@ -23,7 +23,7 @@ app.get('/health', async (_request, reply) => {
   return reply.status(503).send({ status: 'unhealthy' });
 });
 
-// Create user
+// Create user (async - returns pending, client polls for completion)
 app.post('/users', {
   schema: { body: UserDataSchema },
 }, async (request, reply) => {
@@ -33,20 +33,15 @@ app.post('/users', {
   }
 
   const { name, email } = request.body;
-  const result = await writeClient.write('users', { name, email }, idempotencyKey);
+  await writeClient.write('users', { name, email }, idempotencyKey);
 
-  if (result.success) {
-    return reply.status(201).send({
-      userId: result.entityId,
-    });
-  }
-
-  return reply.status(500).send({
-    error: result.error,
+  return reply.status(202).send({
+    status: 'pending',
+    operationId: idempotencyKey,
   });
 });
 
-// Create order
+// Create order (async - returns pending, client polls for completion)
 app.post('/orders', {
   schema: { body: OrderDataSchema },
 }, async (request, reply) => {
@@ -56,16 +51,11 @@ app.post('/orders', {
   }
 
   const { userId, items, total } = request.body;
-  const result = await writeClient.write('orders', { userId, items, total }, idempotencyKey);
+  await writeClient.write('orders', { userId, items, total }, idempotencyKey);
 
-  if (result.success) {
-    return reply.status(201).send({
-      orderId: result.entityId,
-    });
-  }
-
-  return reply.status(500).send({
-    error: result.error,
+  return reply.status(202).send({
+    status: 'pending',
+    operationId: idempotencyKey,
   });
 });
 

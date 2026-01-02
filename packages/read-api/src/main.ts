@@ -3,7 +3,7 @@ import fastifyMetrics from 'fastify-metrics';
 import pg from 'pg';
 import { Redis } from 'ioredis';
 import { connect } from 'nats';
-import type { UserRow, OrderRow } from '@jetstream-pg-writer/shared';
+import type { UserRow, OrderRow, OperationStatusResponse, OperationStatus, SupportedTable } from '@jetstream-pg-writer/shared';
 import { createLogger } from '@jetstream-pg-writer/shared/logger';
 import { startCdcConsumer } from './cdc.js';
 
@@ -101,6 +101,37 @@ fastify.get<{ Querystring: { userId?: string; limit?: string; offset?: string } 
   });
 
   return { orders, limit, offset };
+});
+
+// Operation status polling endpoint (for async writes)
+interface WriteOperationRow {
+  status: OperationStatus;
+  entity_table: SupportedTable;
+  entity_id: string;
+  error: string | null;
+}
+
+fastify.get<{ Params: { operationId: string } }>('/status/:operationId', async (request): Promise<OperationStatusResponse> => {
+  const { operationId } = request.params;
+
+  const result = await db.query<WriteOperationRow>(
+    'SELECT status, entity_table, entity_id, error FROM write_operations WHERE operation_id = $1',
+    [operationId]
+  );
+
+  if (result.rows.length === 0) {
+    // Not found = still pending (not yet processed)
+    return { status: 'pending', operationId };
+  }
+
+  const row = result.rows[0];
+  return {
+    status: row.status,
+    operationId,
+    table: row.entity_table,
+    entityId: row.entity_id,
+    ...(row.error && { error: row.error }),
+  };
 });
 
 async function main() {

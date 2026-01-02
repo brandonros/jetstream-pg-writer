@@ -1,10 +1,13 @@
--- Idempotency tracking table
+-- Idempotency tracking table with async status
 CREATE TABLE IF NOT EXISTS write_operations (
   operation_id UUID PRIMARY KEY,
   entity_table TEXT NOT NULL,
   entity_id UUID NOT NULL,
   op_type TEXT NOT NULL CHECK (op_type IN ('create', 'update', 'delete')),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed')),
+  error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  completed_at TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_write_operations_created ON write_operations(created_at);
