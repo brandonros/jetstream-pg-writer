@@ -127,7 +127,9 @@ export abstract class BaseHandler<T> {
 
       await client.query('COMMIT');
 
-      // 3. Invalidate cache synchronously (before returning to client)
+      // 3. Invalidate cache synchronously so the client sees their own write immediately.
+      // CDC (read-api) also invalidates cache for external changes (migrations, manual SQL, other services).
+      // Both are needed: sync for read-your-writes consistency, CDC for external consistency.
       await this.invalidateCache(entityId, data);
       this.log.info({ table: this.table }, 'Cache invalidated');
 
