@@ -1,6 +1,7 @@
 import { NatsConnection, StringCodec, JetStreamClient, AckPolicy, DeliverPolicy } from 'nats';
 import type { Redis } from 'ioredis';
 import type { Logger } from '@jetstream-pg-writer/shared/logger';
+import { deleteByPattern } from '@jetstream-pg-writer/shared/cache';
 
 const sc = StringCodec();
 
@@ -104,45 +105,45 @@ async function consumeCdcEvents(
       if (table === 'users') {
         switch (op) {
           case 'c': // create
-            await redis.del('users:all');
-            log.info('Invalidated users:all (new user)');
+            await deleteByPattern(redis, 'users:*');
+            log.info('Invalidated users cache (new user)');
             break;
 
           case 'u': // update
-            await redis.del('users:all');
-            log.info({ userId: event.user_id }, 'Invalidated users:all (user updated)');
+            await deleteByPattern(redis, 'users:*');
+            log.info({ userId: event.user_id }, 'Invalidated users cache (user updated)');
             break;
 
           case 'd': // delete
-            await redis.del('users:all');
+            await deleteByPattern(redis, 'users:*');
             if (event.user_id) {
-              await redis.del(`orders:user:${event.user_id}`);
+              await deleteByPattern(redis, `orders:user:${event.user_id}:*`);
             }
-            log.info({ userId: event.user_id }, 'Invalidated users:all + user orders (user deleted)');
+            log.info({ userId: event.user_id }, 'Invalidated users cache + user orders (user deleted)');
             break;
         }
       } else if (table === 'orders') {
         switch (op) {
           case 'c':
-            await redis.del('orders:all');
+            await deleteByPattern(redis, 'orders:*');
             if (event.user_id) {
-              await redis.del(`orders:user:${event.user_id}`);
+              await deleteByPattern(redis, `orders:user:${event.user_id}:*`);
             }
             log.info({ userId: event.user_id }, 'Invalidated orders cache (new order)');
             break;
 
           case 'u':
-            await redis.del('orders:all');
+            await deleteByPattern(redis, 'orders:*');
             if (event.user_id) {
-              await redis.del(`orders:user:${event.user_id}`);
+              await deleteByPattern(redis, `orders:user:${event.user_id}:*`);
             }
             log.info({ userId: event.user_id }, 'Invalidated orders cache (order updated)');
             break;
 
           case 'd':
-            await redis.del('orders:all');
+            await deleteByPattern(redis, 'orders:*');
             if (event.user_id) {
-              await redis.del(`orders:user:${event.user_id}`);
+              await deleteByPattern(redis, `orders:user:${event.user_id}:*`);
             }
             log.info({ userId: event.user_id }, 'Invalidated orders cache (order deleted)');
             break;

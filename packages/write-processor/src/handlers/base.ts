@@ -4,6 +4,7 @@ import pg from 'pg';
 import type { Redis } from 'ioredis';
 import type { WriteRequest, WriteResponse } from '@jetstream-pg-writer/shared';
 import type { Logger } from '@jetstream-pg-writer/shared/logger';
+import { deleteByPattern } from '@jetstream-pg-writer/shared/cache';
 
 const sc = StringCodec();
 
@@ -149,8 +150,16 @@ export abstract class BaseHandler<T> {
       // 3. Invalidate cache synchronously so the client sees their own write immediately.
       // CDC (read-api) also invalidates cache for external changes (migrations, manual SQL, other services).
       // Both are needed: sync for read-your-writes consistency, CDC for external consistency.
-      await this.invalidateCache(entityId, data);
-      this.log.info({ table: this.table }, 'Cache invalidated');
+      //
+      // Non-fatal: write already committed. If Redis is down:
+      // - Client gets success (write did succeed)
+      // - Cache may be stale until CDC catches up or TTL expires (30s)
+      try {
+        await this.invalidateCache(entityId, data);
+        this.log.info({ table: this.table }, 'Cache invalidated');
+      } catch (error) {
+        this.log.warn({ table: this.table, err: error }, 'Cache invalidation failed (non-fatal)');
+      }
 
       return { entityId };
     } catch (error) {
@@ -165,6 +174,11 @@ export abstract class BaseHandler<T> {
 
   // Each handler defines which cache keys to invalidate
   protected abstract invalidateCache(entityId: string, data: T): Promise<void>;
+
+  // Expose shared helper to subclasses
+  protected deleteByPattern(pattern: string): Promise<number> {
+    return deleteByPattern(this.redis, pattern);
+  }
 
   private isRetryable(error: unknown): boolean {
     if (error instanceof Error) {

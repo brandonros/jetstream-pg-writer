@@ -14,7 +14,7 @@ export class OrdersHandler extends BaseHandler<OrderData> {
   }
 
   protected async invalidateCache(_entityId: string, data: OrderData): Promise<void> {
-    await this.redis.del('orders:all');
-    await this.redis.del(`orders:user:${data.userId}`);
+    await this.deleteByPattern('orders:*');
+    await this.deleteByPattern(`orders:user:${data.userId}:*`);
   }
 }

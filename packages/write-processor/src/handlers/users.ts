@@ -14,6 +14,6 @@ export class UsersHandler extends BaseHandler<UserData> {
   }
 
   protected async invalidateCache(): Promise<void> {
-    await this.redis.del('users:all');
+    await this.deleteByPattern('users:*');
   }
 }
