@@ -1,10 +1,13 @@
 import { connect, AckPolicy } from 'nats';
 import pg from 'pg';
 import { Redis } from 'ioredis';
+import { createLogger } from '@jetstream-pg-writer/shared/logger';
 import { UsersHandler } from './handlers/users.js';
 import { OrdersHandler } from './handlers/orders.js';
 
 const { Pool } = pg;
+
+const log = createLogger('write-processor');
 
 const HANDLERS = [
   { name: 'users-writer', filterSubject: 'writes.users' },
@@ -22,7 +25,7 @@ async function main() {
   const js = nc.jetstream();
   const jsm = await nc.jetstreamManager();
 
-  console.log(`Connected to ${natsUrl}`);
+  log.info({ natsUrl }, 'Connected to NATS');
 
   // Ensure streams exist
   try {
@@ -30,9 +33,9 @@ async function main() {
       name: 'WRITES',
       subjects: ['writes.>'],
     });
-    console.log('Created WRITES stream');
+    log.info('Created WRITES stream');
   } catch {
-    console.log('WRITES stream already exists');
+    log.info('WRITES stream already exists');
   }
 
   // Create filtered consumers for each handler
@@ -45,21 +48,21 @@ async function main() {
         max_deliver: 3,
         ack_wait: 30_000_000_000,
       });
-      console.log(`Created consumer: ${name} (${filterSubject})`);
+      log.info({ consumer: name, filterSubject }, 'Created consumer');
     } catch {
-      console.log(`Consumer already exists: ${name}`);
+      log.info({ consumer: name }, 'Consumer already exists');
     }
   }
 
   // Instantiate handlers
   const handlers = [
-    new UsersHandler(nc, js, db, redis),
-    new OrdersHandler(nc, js, db, redis),
+    new UsersHandler(nc, js, db, redis, log),
+    new OrdersHandler(nc, js, db, redis, log),
   ];
 
   // Graceful shutdown
   const shutdown = async () => {
-    console.log('Shutting down...');
+    log.info('Shutting down...');
     await nc.close();
     await db.end();
     await redis.quit();
@@ -70,8 +73,11 @@ async function main() {
   process.on('SIGTERM', shutdown);
 
   // Start all handlers concurrently
-  console.log('Starting handlers...');
+  log.info('Starting handlers...');
   await Promise.all(handlers.map(h => h.start()));
 }
 
-main().catch(console.error);
+main().catch((err) => {
+  log.error({ err }, 'Fatal error');
+  process.exit(1);
+});

@@ -1,9 +1,11 @@
 import Fastify from 'fastify';
+import { createLogger } from '@jetstream-pg-writer/shared/logger';
 import { WriteClient } from './client.js';
 import type { UserData, OrderData } from '@jetstream-pg-writer/shared';
 
-const fastify = Fastify({ logger: true });
-const writeClient = new WriteClient();
+const log = createLogger('write-gateway');
+const fastify = Fastify({ logger: log });
+const writeClient = new WriteClient(log);
 
 // Health check
 fastify.get('/health', async () => {
@@ -75,7 +77,7 @@ async function main() {
   await fastify.listen({ port, host });
 
   const shutdown = async () => {
-    console.log('Shutting down...');
+    log.info('Shutting down...');
     await fastify.close();
     await writeClient.close();
     process.exit(0);
@@ -85,4 +87,7 @@ async function main() {
   process.on('SIGTERM', shutdown);
 }
 
-main().catch(console.error);
+main().catch((err) => {
+  log.error({ err }, 'Fatal error');
+  process.exit(1);
+});

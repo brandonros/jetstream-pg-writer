@@ -1,5 +1,6 @@
 import { connect, NatsConnection, JetStreamClient, StringCodec, headers, createInbox } from 'nats';
 import type { WriteRequest, WriteResponse, SupportedTable, TableDataMap } from '@jetstream-pg-writer/shared';
+import type { Logger } from '@jetstream-pg-writer/shared/logger';
 
 const sc = StringCodec();
 
@@ -7,6 +8,11 @@ export class WriteClient {
   private nc!: NatsConnection;
   private js!: JetStreamClient;
   private connected = false;
+  private log: Logger;
+
+  constructor(log: Logger) {
+    this.log = log;
+  }
 
   async connect(natsUrl = 'nats://localhost:4222') {
     if (this.connected) return;
@@ -15,7 +21,7 @@ export class WriteClient {
     this.js = this.nc.jetstream();
 
     this.connected = true;
-    console.log(`WriteClient connected to ${natsUrl}`);
+    this.log.info({ natsUrl }, 'WriteClient connected');
   }
 
   async write<T extends SupportedTable>(

@@ -3,6 +3,7 @@ import { JetStreamClient, JsMsg, StringCodec, NatsConnection } from 'nats';
 import pg from 'pg';
 import type { Redis } from 'ioredis';
 import type { WriteRequest, WriteResponse } from '@jetstream-pg-writer/shared';
+import type { Logger } from '@jetstream-pg-writer/shared/logger';
 
 const sc = StringCodec();
 
@@ -18,22 +19,24 @@ export abstract class BaseHandler<T> {
   protected nc: NatsConnection;
   protected db: pg.Pool;
   protected redis: Redis;
+  protected log: Logger;
 
   abstract readonly table: string;
   abstract readonly consumerName: string;
 
-  constructor(nc: NatsConnection, js: JetStreamClient, db: pg.Pool, redis: Redis) {
+  constructor(nc: NatsConnection, js: JetStreamClient, db: pg.Pool, redis: Redis, log: Logger) {
     this.nc = nc;
     this.js = js;
     this.db = db;
     this.redis = redis;
+    this.log = log;
   }
 
   async start() {
     const consumer = await this.js.consumers.get('WRITES', this.consumerName);
     const messages = await consumer.consume();
 
-    console.log(`${this.consumerName} handler started, listening for writes.${this.table}`);
+    this.log.info({ handler: this.consumerName, table: this.table }, 'Handler started');
 
     for await (const msg of messages) {
       await this.handleMessage(msg);
@@ -44,7 +47,7 @@ export abstract class BaseHandler<T> {
     const request: WriteRequest = JSON.parse(sc.decode(msg.data));
     const replyTo = msg.headers?.get('Reply-To');
 
-    console.log(`[${this.table}] Processing: ${request.operationId}`);
+    this.log.info({ table: this.table, operationId: request.operationId }, 'Processing write');
 
     let response: WriteResponse;
 
@@ -58,15 +61,15 @@ export abstract class BaseHandler<T> {
       };
 
       if (result.entityId) {
-        console.log(`[${this.table}] Completed: ${request.operationId} -> ${result.entityId}`);
+        this.log.info({ table: this.table, operationId: request.operationId, entityId: result.entityId }, 'Write completed');
       } else {
-        console.log(`[${this.table}] Duplicate skipped: ${request.operationId}`);
+        this.log.info({ table: this.table, operationId: request.operationId }, 'Duplicate skipped');
       }
 
       msg.ack();
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : 'Unknown error';
-      console.error(`[${this.table}] Failed: ${request.operationId}`, errMsg);
+      this.log.error({ table: this.table, operationId: request.operationId, err: errMsg }, 'Write failed');
 
       response = {
         success: false,
@@ -126,7 +129,7 @@ export abstract class BaseHandler<T> {
 
       // 3. Invalidate cache synchronously (before returning to client)
       await this.invalidateCache(entityId, data);
-      console.log(`[${this.table}] Cache invalidated`);
+      this.log.info({ table: this.table }, 'Cache invalidated');
 
       return { entityId };
     } catch (error) {

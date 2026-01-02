@@ -3,9 +3,11 @@ import pg from 'pg';
 import { Redis } from 'ioredis';
 import { connect } from 'nats';
 import type { UserRow, OrderRow } from '@jetstream-pg-writer/shared';
+import { createLogger } from '@jetstream-pg-writer/shared/logger';
 import { startCdcConsumer } from './cdc.js';
 
-const fastify = Fastify({ logger: true });
+const log = createLogger('read-api');
+const fastify = Fastify({ logger: log });
 
 let db: pg.Pool;
 let redis: Redis;
@@ -15,11 +17,11 @@ const CACHE_TTL_SECONDS = 30;
 async function getCached<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
   const cached = await redis.get(key);
   if (cached) {
-    fastify.log.info({ key }, 'Cache hit');
+    log.info({ key }, 'Cache hit');
     return JSON.parse(cached);
   }
 
-  fastify.log.info({ key }, 'Cache miss');
+  log.info({ key }, 'Cache miss');
   const data = await fetcher();
   await redis.setex(key, CACHE_TTL_SECONDS, JSON.stringify(data));
   return data;
@@ -87,7 +89,7 @@ async function main() {
   const host = process.env.HOST || '0.0.0.0';
 
   const nc = await connect({ servers: natsUrl });
-  fastify.log.info('Connected to NATS');
+  log.info('Connected to NATS');
 
   const js = nc.jetstream();
 
@@ -95,18 +97,18 @@ async function main() {
   db = new pg.Pool({ connectionString: databaseUrl });
 
   await redis.ping();
-  fastify.log.info('Connected to Redis');
+  log.info('Connected to Redis');
 
   await db.query('SELECT 1');
-  fastify.log.info('Connected to Postgres');
+  log.info('Connected to Postgres');
 
   // Start CDC consumer for cache invalidation (Debezium → JetStream)
-  await startCdcConsumer({ nc, js, redis, log: fastify.log });
+  await startCdcConsumer({ nc, js, redis, log });
 
   await fastify.listen({ port, host });
 
   const shutdown = async () => {
-    console.log('Shutting down...');
+    log.info('Shutting down...');
     await fastify.close();
     await nc.close();
     await redis.quit();
@@ -118,4 +120,7 @@ async function main() {
   process.on('SIGTERM', shutdown);
 }
 
-main().catch(console.error);
+main().catch((err) => {
+  log.error({ err }, 'Fatal error');
+  process.exit(1);
+});

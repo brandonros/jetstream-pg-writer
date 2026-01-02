@@ -1,6 +1,6 @@
 import { NatsConnection, StringCodec, JetStreamClient, AckPolicy, DeliverPolicy } from 'nats';
 import type { Redis } from 'ioredis';
-import type { FastifyBaseLogger } from 'fastify';
+import type { Logger } from '@jetstream-pg-writer/shared/logger';
 
 const sc = StringCodec();
 
@@ -19,7 +19,7 @@ interface CdcConsumerOptions {
   nc: NatsConnection;
   js: JetStreamClient;
   redis: Redis;
-  log: FastifyBaseLogger;
+  log: Logger;
 }
 
 async function setupCdcConsumer({ nc, js, log }: Omit<CdcConsumerOptions, 'redis'>) {
@@ -70,7 +70,7 @@ async function setupCdcConsumer({ nc, js, log }: Omit<CdcConsumerOptions, 'redis
 async function consumeCdcEvents(
   messages: AsyncIterable<import('nats').JsMsg>,
   redis: Redis,
-  log: FastifyBaseLogger
+  log: Logger
 ) {
   for await (const msg of messages) {
     try {
