@@ -109,8 +109,11 @@ fastify.get<{ Querystring: { userId?: string; limit?: string; offset?: string } 
 });
 
 // Operation status polling endpoint (for async writes)
+// DB stores 'pending'/'completed'/'failed', we map to API status
+type DbOperationStatus = 'pending' | 'completed' | 'failed';
+
 interface WriteOperationRow {
-  status: OperationStatus;
+  status: DbOperationStatus;
   entity_table: SupportedTable;
   entity_id: string;
   error: string | null;
@@ -125,13 +128,15 @@ fastify.get<{ Params: { operationId: string } }>('/status/:operationId', async (
   );
 
   if (result.rows.length === 0) {
-    // Not found = still pending (not yet processed)
-    return { status: 'pending', operationId };
+    // No row yet = in JetStream queue, waiting for processor
+    return { status: 'queued', operationId };
   }
 
   const row = result.rows[0];
+  // Map DB 'pending' to API 'processing' (processor has picked it up)
+  const status: OperationStatus = row.status === 'pending' ? 'processing' : row.status;
   return {
-    status: row.status,
+    status,
     operationId,
     table: row.entity_table,
     entityId: row.entity_id,

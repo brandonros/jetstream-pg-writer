@@ -25,7 +25,7 @@ app.get('/health', async (_request, reply) => {
   return reply.status(503).send({ status: 'unhealthy', ...stats });
 });
 
-// Create user (async - returns pending, client polls for completion)
+// Create user (async - returns queued, client polls for completion)
 app.post('/users', {
   schema: { body: UserDataSchema },
 }, async (request, reply) => {
@@ -49,13 +49,13 @@ app.post('/users', {
   }
 
   return reply.status(202).send({
-    status: 'pending',
+    status: 'queued',
     operationId: idempotencyKey,
     acceptedAt: new Date().toISOString(),
   });
 });
 
-// Create order (async - returns pending, client polls for completion)
+// Create order (async - returns queued, client polls for completion)
 app.post('/orders', {
   schema: { body: OrderDataSchema },
 }, async (request, reply) => {
@@ -79,7 +79,7 @@ app.post('/orders', {
   }
 
   return reply.status(202).send({
-    status: 'pending',
+    status: 'queued',
     operationId: idempotencyKey,
     acceptedAt: new Date().toISOString(),
   });

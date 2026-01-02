@@ -46,7 +46,10 @@ export interface WriteResponse {
 export type SupportedTable = 'users' | 'orders';
 
 // Async operation status types
-export type OperationStatus = 'pending' | 'completed' | 'failed';
+// - queued: accepted by gateway, in JetStream, processor hasn't picked it up
+// - processing: processor has started working on it (DB row exists with pending)
+// - completed/failed: done
+export type OperationStatus = 'queued' | 'processing' | 'completed' | 'failed';
 
 export interface OperationStatusResponse {
   status: OperationStatus;

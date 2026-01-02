@@ -36,8 +36,8 @@ export function App() {
       await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
     }
 
-    // Timeout - return pending status
-    return { status: 'pending', operationId };
+    // Timeout - still queued/processing, didn't complete in time
+    return { status: 'queued', operationId };
   };
 
   const fetchData = async () => {
@@ -79,7 +79,7 @@ export function App() {
       });
       const data = await res.json();
 
-      if (data.status !== 'pending') {
+      if (data.status !== 'queued') {
         addResult(`Error: Unexpected response (retry will use same idempotency key)`);
         return;
       }
@@ -131,7 +131,7 @@ export function App() {
       });
       const data = await res.json();
 
-      if (data.status !== 'pending') {
+      if (data.status !== 'queued') {
         addResult(`Error: Unexpected response (retry will use same idempotency key)`);
         return;
       }
