@@ -13,8 +13,8 @@ export class OrdersHandler extends BaseHandler<OrderData> {
     );
   }
 
-  protected async invalidateCache(_entityId: string, data: OrderData): Promise<void> {
-    await this.deleteByPattern('orders:*');
-    await this.deleteByPattern(`orders:user:${data.userId}:*`);
+  protected async invalidateCache(): Promise<void> {
+    // All order cache keys (including user-specific ones) are tracked under 'orders' namespace
+    await this.invalidateNamespace('orders');
   }
 }

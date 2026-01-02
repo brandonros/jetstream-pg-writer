@@ -14,6 +14,6 @@ export class UsersHandler extends BaseHandler<UserData> {
   }
 
   protected async invalidateCache(): Promise<void> {
-    await this.deleteByPattern('users:*');
+    await this.invalidateNamespace('users');
   }
 }

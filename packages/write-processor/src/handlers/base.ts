@@ -4,12 +4,24 @@ import pg from 'pg';
 import type { Redis } from 'ioredis';
 import type { WriteRequest } from '@jetstream-pg-writer/shared';
 import type { Logger } from '@jetstream-pg-writer/shared/logger';
-import { deleteByPattern } from '@jetstream-pg-writer/shared/cache';
+import { invalidateNamespace } from '@jetstream-pg-writer/shared/cache';
 
 const sc = StringCodec();
 
-// Postgres error code for unique_violation
+// Postgres error codes - safelist of retryable errors
+// Using safelist (only retry known-transient) is safer than blocklist
 const PG_UNIQUE_VIOLATION = '23505';
+const PG_RETRYABLE_CODES = new Set([
+  '08000', // connection_exception
+  '08003', // connection_does_not_exist
+  '08006', // connection_failure
+  '40001', // serialization_failure (deadlock)
+  '40P01', // deadlock_detected
+  '53300', // too_many_connections
+  '57P01', // admin_shutdown
+  '57P02', // crash_shutdown
+  '57P03', // cannot_connect_now
+]);
 
 export abstract class BaseHandler<T> {
   protected js: JetStreamClient;
@@ -108,9 +120,15 @@ export abstract class BaseHandler<T> {
       await client.query('ROLLBACK');
 
       // Record failure for non-retryable errors so client can poll for result
+      // Wrap in try/catch to preserve original error context
       if (!this.isRetryable(error)) {
         const errMsg = error instanceof Error ? error.message : 'Unknown error';
-        await this.recordFailure(operationId, entityId, errMsg);
+        try {
+          await this.recordFailure(operationId, entityId, errMsg);
+        } catch (recordErr) {
+          // Log but don't lose the original error
+          this.log.error({ table: this.table, operationId, recordErr }, 'Failed to record failure (original error preserved)');
+        }
       }
 
       throw error;
@@ -120,17 +138,13 @@ export abstract class BaseHandler<T> {
   }
 
   private async recordFailure(operationId: string, entityId: string, error: string): Promise<void> {
-    try {
-      await this.db.query(
-        `INSERT INTO write_operations (operation_id, entity_table, entity_id, op_type, status, error, completed_at)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW())
-         ON CONFLICT (operation_id) DO UPDATE SET status = $5, error = $6, completed_at = NOW()`,
-        [operationId, this.table, entityId, 'create', 'failed', error]
-      );
-      this.log.info({ table: this.table, operationId }, 'Failure recorded');
-    } catch (err) {
-      this.log.error({ table: this.table, operationId, err }, 'Failed to record failure');
-    }
+    await this.db.query(
+      `INSERT INTO write_operations (operation_id, entity_table, entity_id, op_type, status, error, completed_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())
+       ON CONFLICT (operation_id) DO UPDATE SET status = $5, error = $6, completed_at = NOW()`,
+      [operationId, this.table, entityId, 'create', 'failed', error]
+    );
+    this.log.info({ table: this.table, operationId }, 'Failure recorded');
   }
 
   protected abstract insert(client: pg.PoolClient, entityId: string, data: T): Promise<void>;
@@ -138,20 +152,16 @@ export abstract class BaseHandler<T> {
   // Each handler defines which cache keys to invalidate
   protected abstract invalidateCache(entityId: string, data: T): Promise<void>;
 
-  // Expose shared helper to subclasses
-  protected deleteByPattern(pattern: string): Promise<number> {
-    return deleteByPattern(this.redis, pattern);
+  // Expose invalidateNamespace helper to subclasses
+  protected invalidateNamespace(namespace: 'users' | 'orders'): Promise<number> {
+    return invalidateNamespace(this.redis, namespace);
   }
 
+  // Safelist approach: only retry known-transient Postgres errors
+  // Safer than blocklist - unknown errors fail fast rather than retry forever
   private isRetryable(error: unknown): boolean {
-    if (error instanceof Error) {
-      const msg = error.message.toLowerCase();
-      return (
-        msg.includes('connection') ||
-        msg.includes('timeout') ||
-        msg.includes('deadlock') ||
-        msg.includes('too many connections')
-      );
+    if (error instanceof Error && 'code' in error && typeof error.code === 'string') {
+      return PG_RETRYABLE_CODES.has(error.code);
     }
     return false;
   }

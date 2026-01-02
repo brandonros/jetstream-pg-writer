@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import { serializerCompiler, validatorCompiler, ZodTypeProvider } from 'fastify-type-provider-zod';
 import { createLogger } from '@jetstream-pg-writer/shared/logger';
-import { WriteClient } from './client.js';
+import { WriteClient, BackpressureError, CircuitOpenError } from './client.js';
 import { UserDataSchema, OrderDataSchema } from '@jetstream-pg-writer/shared';
 
 const log = createLogger('write-gateway');
@@ -14,13 +14,15 @@ fastify.setSerializerCompiler(serializerCompiler);
 const app = fastify.withTypeProvider<ZodTypeProvider>();
 const writeClient = new WriteClient(log);
 
-// Health check
+// Health check with backpressure stats
 app.get('/health', async (_request, reply) => {
   const healthy = await writeClient.healthCheck();
-  if (healthy) {
-    return { status: 'ok' };
+  const stats = writeClient.getStats();
+
+  if (healthy && !stats.circuitOpen) {
+    return { status: 'ok', ...stats };
   }
-  return reply.status(503).send({ status: 'unhealthy' });
+  return reply.status(503).send({ status: 'unhealthy', ...stats });
 });
 
 // Create user (async - returns pending, client polls for completion)
@@ -33,7 +35,18 @@ app.post('/users', {
   }
 
   const { name, email } = request.body;
-  await writeClient.write('users', { name, email }, idempotencyKey);
+
+  try {
+    await writeClient.write('users', { name, email }, idempotencyKey);
+  } catch (error) {
+    if (error instanceof BackpressureError || error instanceof CircuitOpenError) {
+      return reply
+        .status(503)
+        .header('Retry-After', '5')
+        .send({ error: error.message });
+    }
+    throw error;
+  }
 
   return reply.status(202).send({
     status: 'pending',
@@ -51,7 +64,18 @@ app.post('/orders', {
   }
 
   const { userId, items, total } = request.body;
-  await writeClient.write('orders', { userId, items, total }, idempotencyKey);
+
+  try {
+    await writeClient.write('orders', { userId, items, total }, idempotencyKey);
+  } catch (error) {
+    if (error instanceof BackpressureError || error instanceof CircuitOpenError) {
+      return reply
+        .status(503)
+        .header('Retry-After', '5')
+        .send({ error: error.message });
+    }
+    throw error;
+  }
 
   return reply.status(202).send({
     status: 'pending',

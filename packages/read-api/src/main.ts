@@ -5,6 +5,7 @@ import { Redis } from 'ioredis';
 import { connect } from 'nats';
 import type { UserRow, OrderRow, OperationStatusResponse, OperationStatus, SupportedTable } from '@jetstream-pg-writer/shared';
 import { createLogger } from '@jetstream-pg-writer/shared/logger';
+import { setTrackedCache } from '@jetstream-pg-writer/shared/cache';
 import { startCdcConsumer } from './cdc.js';
 
 const log = createLogger('read-api');
@@ -16,7 +17,7 @@ let redis: Redis;
 const CACHE_TTL_SECONDS = 30;
 
 /**
- * Cache-aside pattern with Redis.
+ * Cache-aside pattern with Redis and tracked keys.
  *
  * TRADEOFF: Redis failure = read failure. This is intentional:
  * - Redis is a required infrastructure component, not an optimization
@@ -26,7 +27,11 @@ const CACHE_TTL_SECONDS = 30;
  * NOTE: Assumes single Postgres instance. Read replicas would require
  * cache cooldown or primary reads on cache miss to avoid caching stale data.
  */
-async function getCached<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
+async function getCached<T>(
+  namespace: 'users' | 'orders',
+  key: string,
+  fetcher: () => Promise<T>
+): Promise<T> {
   const cached = await redis.get(key);
   if (cached) {
     log.info({ key }, 'Cache hit');
@@ -35,7 +40,7 @@ async function getCached<T>(key: string, fetcher: () => Promise<T>): Promise<T> 
 
   log.info({ key }, 'Cache miss');
   const data = await fetcher();
-  await redis.setex(key, CACHE_TTL_SECONDS, JSON.stringify(data));
+  await setTrackedCache(redis, namespace, key, JSON.stringify(data), CACHE_TTL_SECONDS);
   return data;
 }
 
@@ -65,7 +70,7 @@ fastify.get<{ Querystring: { limit?: string; offset?: string } }>('/users', asyn
   const offset = parseInt(request.query.offset || '0', 10);
   const cacheKey = `users:limit:${limit}:offset:${offset}`;
 
-  const users = await getCached<UserRow[]>(cacheKey, async () => {
+  const users = await getCached<UserRow[]>('users', cacheKey, async () => {
     const result = await db.query<UserRow>(
       'SELECT user_id, name, email, created_at FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2',
       [limit, offset]
@@ -84,7 +89,7 @@ fastify.get<{ Querystring: { userId?: string; limit?: string; offset?: string } 
     ? `orders:user:${userId}:limit:${limit}:offset:${offset}`
     : `orders:limit:${limit}:offset:${offset}`;
 
-  const orders = await getCached<OrderRow[]>(cacheKey, async () => {
+  const orders = await getCached<OrderRow[]>('orders', cacheKey, async () => {
     if (userId) {
       const result = await db.query<OrderRow>(
         'SELECT order_id, user_id, items, total, created_at FROM orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',

@@ -1,7 +1,7 @@
 import { NatsConnection, StringCodec, JetStreamClient, AckPolicy, DeliverPolicy } from 'nats';
 import type { Redis } from 'ioredis';
 import type { Logger } from '@jetstream-pg-writer/shared/logger';
-import { deleteByPattern } from '@jetstream-pg-writer/shared/cache';
+import { invalidateNamespace } from '@jetstream-pg-writer/shared/cache';
 
 const sc = StringCodec();
 
@@ -102,52 +102,19 @@ async function consumeCdcEvents(
         continue;
       }
 
+      // Invalidate entire namespace - tracked keys make this O(n) where n = keys in namespace
       if (table === 'users') {
-        switch (op) {
-          case 'c': // create
-            await deleteByPattern(redis, 'users:*');
-            log.info('Invalidated users cache (new user)');
-            break;
-
-          case 'u': // update
-            await deleteByPattern(redis, 'users:*');
-            log.info({ userId: event.user_id }, 'Invalidated users cache (user updated)');
-            break;
-
-          case 'd': // delete
-            await deleteByPattern(redis, 'users:*');
-            if (event.user_id) {
-              await deleteByPattern(redis, `orders:user:${event.user_id}:*`);
-            }
-            log.info({ userId: event.user_id }, 'Invalidated users cache + user orders (user deleted)');
-            break;
+        await invalidateNamespace(redis, 'users');
+        // User deletion may affect orders (FK relationship)
+        if (op === 'd') {
+          await invalidateNamespace(redis, 'orders');
+          log.info({ userId: event.user_id, op }, 'Invalidated users + orders cache');
+        } else {
+          log.info({ userId: event.user_id, op }, 'Invalidated users cache');
         }
       } else if (table === 'orders') {
-        switch (op) {
-          case 'c':
-            await deleteByPattern(redis, 'orders:*');
-            if (event.user_id) {
-              await deleteByPattern(redis, `orders:user:${event.user_id}:*`);
-            }
-            log.info({ userId: event.user_id }, 'Invalidated orders cache (new order)');
-            break;
-
-          case 'u':
-            await deleteByPattern(redis, 'orders:*');
-            if (event.user_id) {
-              await deleteByPattern(redis, `orders:user:${event.user_id}:*`);
-            }
-            log.info({ userId: event.user_id }, 'Invalidated orders cache (order updated)');
-            break;
-
-          case 'd':
-            await deleteByPattern(redis, 'orders:*');
-            if (event.user_id) {
-              await deleteByPattern(redis, `orders:user:${event.user_id}:*`);
-            }
-            log.info({ userId: event.user_id }, 'Invalidated orders cache (order deleted)');
-            break;
-        }
+        await invalidateNamespace(redis, 'orders');
+        log.info({ userId: event.user_id, op }, 'Invalidated orders cache');
       }
 
       msg.ack();
