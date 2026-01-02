@@ -7,10 +7,10 @@ Request/reply pattern through NATS JetStream with idempotent Postgres writes.
 HTTP client wants synchronous confirmation that a write succeeded, but we also want durability and decoupling. Solution: publish to JetStream with a reply inbox, consumer writes to Postgres and replies.
 
 ```
-Client ──▶ Producer (HTTP) ──▶ JetStream ──▶ Consumer ──▶ Postgres
-                ◀───────────────────────────────────◀──── reply
+Client ──▶ write-gateway ──▶ JetStream ──▶ write-processor ──▶ Postgres
+                  ◀─────────────────────────────────◀──── reply
 
-Postgres WAL ──▶ Debezium ──▶ JetStream ──▶ Reader ──▶ Redis invalidation
+Postgres WAL ──▶ Debezium ──▶ JetStream ──▶ read-api ──▶ Redis invalidation
 ```
 
 ## Quick start
@@ -33,11 +33,11 @@ just destroy   # Tear down infrastructure
 
 ```
 packages/
-  shared/     # Types
-  producer/   # Fastify API → publishes to JetStream
-  consumer/   # JetStream → Postgres
-  reader/     # Fastify API → reads from Redis/Postgres
-  frontend/   # React UI
+  shared/           # Types
+  write-gateway/    # HTTP API → publishes writes to JetStream
+  write-processor/  # JetStream → Postgres (with cache invalidation)
+  read-api/         # HTTP API → reads from Redis/Postgres
+  frontend/         # React UI
 ```
 
 ## Cache invalidation (CDC)
@@ -49,7 +49,7 @@ Debezium Server connects to Postgres logical replication and streams WAL changes
 - **Tables**: `public.users`, `public.orders`
 - **Events**: Published to `cdc.public.users`, `cdc.public.orders`
 
-The reader creates a durable JetStream consumer and invalidates Redis keys when CDC events arrive. This captures ALL changes (application writes, migrations, manual SQL) without requiring manual invalidation code.
+The read-api creates a durable JetStream consumer and invalidates Redis keys when CDC events arrive. This captures ALL changes (application writes, migrations, manual SQL) without requiring manual invalidation code.
 
 ## Idempotency
 
@@ -67,10 +67,10 @@ CREATE TABLE write_operations (
 
 Flow:
 1. Client sends write request with `operationId`
-2. Consumer attempts `INSERT INTO write_operations` (idempotency check)
+2. write-processor attempts `INSERT INTO write_operations` (idempotency check)
 3. If duplicate → return existing `entity_id` (idempotent success)
-4. If new → insert domain row, return new `entity_id`
-5. Both operations in same transaction
+4. If new → insert domain row, invalidate cache, return new `entity_id`
+5. All operations in same transaction (except cache invalidation)
 
 This separates transport concerns (idempotency) from domain concerns (entity IDs).
 

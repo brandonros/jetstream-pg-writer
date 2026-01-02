@@ -1,5 +1,5 @@
 {
-  "name": "@jetstream-pg-writer/reader",
+  "name": "@jetstream-pg-writer/read-api",
   "version": "0.0.1",
   "private": true,
   "type": "module",

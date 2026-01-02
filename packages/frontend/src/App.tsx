@@ -22,8 +22,8 @@ export function App() {
   const fetchData = async () => {
     try {
       const [usersRes, ordersRes] = await Promise.all([
-        fetch('/api/reader/users'),
-        fetch('/api/reader/orders'),
+        fetch('/api/read/users'),
+        fetch('/api/read/orders'),
       ]);
       const usersData = await usersRes.json();
       const ordersData = await ordersRes.json();
@@ -44,7 +44,7 @@ export function App() {
   const createUser = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/producer/users', {
+      const res = await fetch('/api/write/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -77,7 +77,7 @@ export function App() {
 
     setLoading(true);
     try {
-      const res = await fetch('/api/producer/orders', {
+      const res = await fetch('/api/write/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -101,7 +101,7 @@ export function App() {
   };
 
   const getUserName = (userId: string) => {
-    const user = users.find((u) => u.id === userId);
+    const user = users.find((u) => u.user_id === userId);
     return user?.name || userId.slice(0, 8) + '...';
   };
 
@@ -124,7 +124,7 @@ export function App() {
             <option value="">No users yet</option>
           ) : (
             users.map((user) => (
-              <option key={user.id} value={user.id}>
+              <option key={user.user_id} value={user.user_id}>
                 {user.name} ({user.email})
               </option>
             ))
@@ -156,8 +156,8 @@ export function App() {
               </thead>
               <tbody>
                 {users.map((user) => (
-                  <tr key={user.id} style={{ borderBottom: '1px solid #eee' }}>
-                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{user.id.slice(0, 8)}</td>
+                  <tr key={user.user_id} style={{ borderBottom: '1px solid #eee' }}>
+                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{user.user_id.slice(0, 8)}</td>
                     <td>{user.name}</td>
                     <td>{user.email}</td>
                   </tr>
@@ -183,8 +183,8 @@ export function App() {
               </thead>
               <tbody>
                 {orders.map((order) => (
-                  <tr key={order.id} style={{ borderBottom: '1px solid #eee' }}>
-                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{order.id.slice(0, 8)}</td>
+                  <tr key={order.order_id} style={{ borderBottom: '1px solid #eee' }}>
+                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{order.order_id.slice(0, 8)}</td>
                     <td>{getUserName(order.user_id)}</td>
                     <td>${order.total}</td>
                     <td>{order.items.length} item(s)</td>

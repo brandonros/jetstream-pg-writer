@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev:producer": "pnpm --filter @jetstream-pg-writer/producer dev",
-    "dev:consumer": "pnpm --filter @jetstream-pg-writer/consumer dev",
-    "dev:reader": "pnpm --filter @jetstream-pg-writer/reader dev",
+    "dev:write-gateway": "pnpm --filter @jetstream-pg-writer/write-gateway dev",
+    "dev:write-processor": "pnpm --filter @jetstream-pg-writer/write-processor dev",
+    "dev:read-api": "pnpm --filter @jetstream-pg-writer/read-api dev",
     "dev:frontend": "pnpm --filter @jetstream-pg-writer/frontend dev"
   },
   "devDependencies": {

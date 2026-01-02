@@ -89,10 +89,10 @@ services:
       retries: 30
       start_period: 30s
 
-  producer:
+  write-gateway:
     build:
       context: .
-      dockerfile: packages/producer/Dockerfile
+      dockerfile: packages/write-gateway/Dockerfile
     ports:
       - "3000:3000"
     depends_on:
@@ -101,23 +101,26 @@ services:
       NATS_URL: nats://nats:4222
       PORT: "3000"
 
-  consumer:
+  write-processor:
     build:
       context: .
-      dockerfile: packages/consumer/Dockerfile
+      dockerfile: packages/write-processor/Dockerfile
     depends_on:
       nats:
         condition: service_started
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       NATS_URL: nats://nats:4222
       DATABASE_URL: postgres://jetstream:jetstream@postgres:5432/jetstream
+      REDIS_URL: redis://redis:6379
 
-  reader:
+  read-api:
     build:
       context: .
-      dockerfile: packages/reader/Dockerfile
+      dockerfile: packages/read-api/Dockerfile
     ports:
       - "3001:3001"
     depends_on:
@@ -142,8 +145,8 @@ services:
     ports:
       - "80:80"
     depends_on:
-      - producer
-      - reader
+      - write-gateway
+      - read-api
 
 volumes:
   nats-data:

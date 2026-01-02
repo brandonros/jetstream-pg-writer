@@ -7,16 +7,16 @@ WORKDIR /app
 # Copy workspace config and package.json files first (better layer caching)
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml* ./
 COPY packages/shared/package.json ./packages/shared/
-COPY packages/reader/package.json ./packages/reader/
+COPY packages/read-api/package.json ./packages/read-api/
 
 # Install dependencies (cached unless package.json changes)
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
 # Copy source files
 COPY packages/shared ./packages/shared
-COPY packages/reader ./packages/reader
+COPY packages/read-api ./packages/read-api
 
-WORKDIR /app/packages/reader
+WORKDIR /app/packages/read-api
 
 EXPOSE 3001
 
