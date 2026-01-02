@@ -1,4 +1,4 @@
-import { NatsConnection, StringCodec, JetStreamClient, AckPolicy, DeliverPolicy } from 'nats';
+import { NatsConnection, StringCodec, JetStreamClient, AckPolicy, DeliverPolicy, StorageType, DiscardPolicy } from 'nats';
 import type { Redis } from 'ioredis';
 import type { FastifyBaseLogger } from 'fastify';
 
@@ -30,9 +30,10 @@ export async function startCdcConsumer({ nc, js, redis, log }: CdcConsumerOption
   const maxRetries = 30;
   const retryDelay = 2000;
 
+  const jsm = await nc.jetstreamManager();
+
   for (let i = 0; i < maxRetries; i++) {
     try {
-      const jsm = await nc.jetstreamManager();
       await jsm.streams.info(streamName);
       log.info(`Found CDC stream: ${streamName}`);
       break;
@@ -46,11 +47,24 @@ export async function startCdcConsumer({ nc, js, redis, log }: CdcConsumerOption
     }
   }
 
+  // Ensure CDC_CONFIRMS stream exists (for durable confirmations back to consumer)
+  try {
+    await jsm.streams.add({
+      name: 'CDC_CONFIRMS',
+      subjects: ['cdc.confirm.>'],
+      storage: StorageType.Memory,
+      max_age: 60_000_000_000, // 60 seconds
+      discard: DiscardPolicy.Old,
+    });
+    log.info('Created CDC_CONFIRMS stream');
+  } catch {
+    log.info('CDC_CONFIRMS stream already exists');
+  }
+
   // Create a durable consumer for cache invalidation
   const consumerName = 'cache-invalidator';
 
   try {
-    const jsm = await nc.jetstreamManager();
     await jsm.consumers.add(streamName, {
       durable_name: consumerName,
       ack_policy: AckPolicy.Explicit,
@@ -89,10 +103,10 @@ export async function startCdcConsumer({ nc, js, redis, log }: CdcConsumerOption
         }
       }
 
-      // Publish confirmation so the writer can unblock
+      // Publish confirmation to JetStream so the writer can unblock (durable)
       const operationId = event.id;
       if (operationId) {
-        nc.publish(`cdc.confirm.${operationId}`, sc.encode(JSON.stringify({ invalidated: true })));
+        await js.publish(`cdc.confirm.${operationId}`, sc.encode(JSON.stringify({ invalidated: true })));
         log.info({ operationId }, 'Published CDC confirmation');
       }
 

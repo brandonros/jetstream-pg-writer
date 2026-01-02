@@ -1,4 +1,4 @@
-import { connect, AckPolicy } from 'nats';
+import { connect, AckPolicy, StorageType, DiscardPolicy } from 'nats';
 import pg from 'pg';
 import { UsersHandler } from './handlers/users.js';
 import { OrdersHandler } from './handlers/orders.js';
@@ -21,7 +21,7 @@ async function main() {
 
   console.log(`Connected to ${natsUrl}`);
 
-  // Ensure stream exists
+  // Ensure streams exist
   try {
     await jsm.streams.add({
       name: 'WRITES',
@@ -30,6 +30,20 @@ async function main() {
     console.log('Created WRITES stream');
   } catch {
     console.log('WRITES stream already exists');
+  }
+
+  // CDC confirmations stream (memory, short retention)
+  try {
+    await jsm.streams.add({
+      name: 'CDC_CONFIRMS',
+      subjects: ['cdc.confirm.>'],
+      storage: StorageType.Memory,
+      max_age: 60_000_000_000, // 60 seconds in nanoseconds
+      discard: DiscardPolicy.Old,
+    });
+    console.log('Created CDC_CONFIRMS stream');
+  } catch {
+    console.log('CDC_CONFIRMS stream already exists');
   }
 
   // Create filtered consumers for each handler

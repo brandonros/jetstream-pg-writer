@@ -1,4 +1,4 @@
-import { JetStreamClient, JsMsg, StringCodec, NatsConnection } from 'nats';
+import { JetStreamClient, JsMsg, StringCodec, NatsConnection, ConsumerMessages } from 'nats';
 import pg from 'pg';
 import type { WriteRequest, WriteResponse } from '@jetstream-pg-writer/shared';
 
@@ -8,7 +8,7 @@ const sc = StringCodec();
 const PG_UNIQUE_VIOLATION = '23505';
 
 // Timeout waiting for CDC confirmation (ms)
-const CDC_CONFIRM_TIMEOUT_MS = 100_000;
+const CDC_CONFIRM_TIMEOUT_MS = 10_000;
 
 export abstract class BaseHandler<T> {
   protected js: JetStreamClient;
@@ -102,30 +102,32 @@ export abstract class BaseHandler<T> {
 
   private waitForCdcConfirmation(operationId: string): { promise: Promise<void>; cancel: () => void } {
     const subject = `cdc.confirm.${operationId}`;
-    let timeoutId: NodeJS.Timeout;
-    let sub: ReturnType<NatsConnection['subscribe']>;
+    let cancelled = false;
+    let messages: ConsumerMessages | undefined;
 
-    const promise = new Promise<void>((resolve, reject) => {
-      timeoutId = setTimeout(() => {
-        sub.unsubscribe();
-        reject(new Error(`CDC confirmation timeout after ${CDC_CONFIRM_TIMEOUT_MS}ms`));
-      }, CDC_CONFIRM_TIMEOUT_MS);
+    const promise = (async () => {
+      // Create ephemeral consumer filtered to this specific confirmation
+      const consumer = await this.js.consumers.get('CDC_CONFIRMS', {
+        filterSubjects: [subject],
+      });
 
-      sub = this.nc.subscribe(subject, { max: 1 });
+      messages = await consumer.fetch({ max_messages: 1, expires: CDC_CONFIRM_TIMEOUT_MS });
 
-      (async () => {
-        for await (const _msg of sub) {
-          clearTimeout(timeoutId);
-          console.log(`[${this.table}] CDC confirmed: ${operationId}`);
-          resolve();
-          break;
-        }
-      })().catch(reject);
-    });
+      for await (const msg of messages) {
+        if (cancelled) return;
+        msg.ack();
+        console.log(`[${this.table}] CDC confirmed: ${operationId}`);
+        return;
+      }
+
+      if (!cancelled) {
+        throw new Error(`CDC confirmation timeout after ${CDC_CONFIRM_TIMEOUT_MS}ms`);
+      }
+    })();
 
     const cancel = () => {
-      clearTimeout(timeoutId);
-      sub?.unsubscribe();
+      cancelled = true;
+      messages?.stop();
     };
 
     return { promise, cancel };

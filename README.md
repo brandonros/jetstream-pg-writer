@@ -51,6 +51,19 @@ Debezium Server connects to Postgres logical replication and streams WAL changes
 
 The reader creates a durable JetStream consumer and invalidates Redis keys when CDC events arrive. This captures ALL changes (application writes, migrations, manual SQL) without requiring manual invalidation code.
 
+### Write consistency
+
+The consumer waits for CDC confirmation before replying to the producer:
+
+1. Consumer subscribes to `cdc.confirm.{operationId}`
+2. Consumer inserts row to Postgres
+3. Debezium captures WAL change → publishes to `cdc.public.{table}`
+4. Reader invalidates Redis → publishes to `cdc.confirm.{operationId}`
+5. Consumer receives confirmation → replies to producer
+6. Producer returns HTTP 201
+
+This ensures clients never read stale cache data after a successful write.
+
 ## Key design decisions
 
 - **operationId = entity id** — The idempotency key becomes the primary key. No separate tracking table needed.
