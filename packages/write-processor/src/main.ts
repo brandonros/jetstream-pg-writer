@@ -19,7 +19,10 @@ async function main() {
   const databaseUrl = process.env.DATABASE_URL || 'postgres://jetstream:jetstream@localhost:5432/jetstream';
   const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 
-  const db = new Pool({ connectionString: databaseUrl });
+  const db = new Pool({
+    connectionString: databaseUrl,
+    max: 25,  // 25 × 2 replicas = 50 total, Postgres handles fine
+  });
   const redis = new Redis(redisUrl);
   const nc = await connect({ servers: natsUrl });
   const js = nc.jetstream();

@@ -11,6 +11,9 @@ const sc = StringCodec();
 // Consumer max_deliver is 3, so redeliveryCount 2 = final attempt (0, 1, 2)
 const MAX_REDELIVERY_COUNT = 2;
 
+// Status cache TTL - completed/failed statuses are immutable, cache for 1 hour
+const STATUS_CACHE_TTL_SECONDS = 3600;
+
 // Postgres error codes - safelist of retryable errors
 // Using safelist (only retry known-transient) is safer than blocklist
 const PG_UNIQUE_VIOLATION = '23505';
@@ -124,7 +127,10 @@ export abstract class BaseHandler<T> {
       await client.query('COMMIT');
       this.log.info({ table: this.table, operationId, entityId }, 'Write completed');
 
-      // 4. Invalidate cache (non-fatal)
+      // 4. Cache status for fast polling (non-fatal)
+      await this.cacheStatus(operationId, 'completed', entityId);
+
+      // 5. Invalidate cache (non-fatal)
       try {
         await this.invalidateCache(operationId, entityId, data);
       } catch (error) {
@@ -159,6 +165,39 @@ export abstract class BaseHandler<T> {
       [operationId, this.table, entityId, 'create', 'failed', error]
     );
     this.log.info({ table: this.table, operationId }, 'Failure recorded');
+
+    // Cache failed status for fast polling
+    await this.cacheStatus(operationId, 'failed', entityId, error);
+  }
+
+  /**
+   * Cache operation status in Redis for fast polling.
+   * Only caches terminal states (completed/failed) since they're immutable.
+   * Non-fatal - polling falls back to Postgres on cache miss.
+   */
+  private async cacheStatus(
+    operationId: string,
+    status: 'completed' | 'failed',
+    entityId: string,
+    error?: string
+  ): Promise<void> {
+    try {
+      const cached = {
+        status,
+        operationId,
+        table: this.table,
+        entityId,
+        ...(error && { error }),
+      };
+      await this.redis.setex(
+        `status:${operationId}`,
+        STATUS_CACHE_TTL_SECONDS,
+        JSON.stringify(cached)
+      );
+      this.log.debug({ operationId, status }, 'Status cached');
+    } catch (err) {
+      this.log.warn({ operationId, err }, 'Status cache write failed (non-fatal)');
+    }
   }
 
   protected abstract insert(client: pg.PoolClient, entityId: string, data: T): Promise<void>;

@@ -122,6 +122,18 @@ interface WriteOperationRow {
 fastify.get<{ Params: { operationId: string } }>('/status/:operationId', async (request): Promise<OperationStatusResponse> => {
   const { operationId } = request.params;
 
+  // Check Redis first for completed/failed statuses (immutable, safe to cache)
+  try {
+    const cached = await redis.get(`status:${operationId}`);
+    if (cached) {
+      log.debug({ operationId }, 'Status cache hit');
+      return JSON.parse(cached);
+    }
+  } catch (err) {
+    log.warn({ operationId, err }, 'Status cache read failed, falling back to Postgres');
+  }
+
+  // Cache miss or error - query Postgres
   const result = await db.query<WriteOperationRow>(
     'SELECT status, entity_table, entity_id, error FROM write_operations WHERE operation_id = $1',
     [operationId]
@@ -163,7 +175,10 @@ async function main() {
   const js = nc.jetstream();
 
   redis = new Redis(redisUrl);
-  db = new pg.Pool({ connectionString: databaseUrl });
+  db = new pg.Pool({
+    connectionString: databaseUrl,
+    max: 25,  // Handle polling load; 25 × 2 replicas = 50 total
+  });
 
   await redis.ping();
   log.info('Connected to Redis');
