@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import fastifyMetrics from 'fastify-metrics';
 import pg from 'pg';
 import { Redis } from 'ioredis';
 import { connect } from 'nats';
@@ -7,7 +8,7 @@ import { createLogger } from '@jetstream-pg-writer/shared/logger';
 import { startCdcConsumer } from './cdc.js';
 
 const log = createLogger('read-api');
-const fastify = Fastify({ logger: log });
+const fastify = Fastify({ logger: log, trustProxy: true });
 
 let db: pg.Pool;
 let redis: Redis;
@@ -108,6 +109,12 @@ async function main() {
   const databaseUrl = process.env.DATABASE_URL || 'postgres://jetstream:jetstream@localhost:5432/jetstream';
   const port = parseInt(process.env.PORT || '3001', 10);
   const host = process.env.HOST || '0.0.0.0';
+
+  await fastify.register(fastifyMetrics.default, {
+    endpoint: '/metrics',
+    defaultMetrics: { enabled: true },
+    routeMetrics: { enabled: true },
+  });
 
   const nc = await connect({ servers: natsUrl });
   log.info('Connected to NATS');

@@ -8,6 +8,7 @@
     "start": "tsx src/main.ts"
   },
   "dependencies": {
+    "@fastify/rate-limit": "^10.3.0",
     "@jetstream-pg-writer/shared": "workspace:*",
     "fastify": "^5.0.0",
     "fastify-type-provider-zod": "^6.1.0",

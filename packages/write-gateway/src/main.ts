@@ -1,11 +1,12 @@
 import Fastify from 'fastify';
+import rateLimit from '@fastify/rate-limit';
 import { serializerCompiler, validatorCompiler, ZodTypeProvider } from 'fastify-type-provider-zod';
 import { createLogger } from '@jetstream-pg-writer/shared/logger';
 import { WriteClient } from './client.js';
 import { UserDataSchema, OrderDataSchema } from '@jetstream-pg-writer/shared';
 
 const log = createLogger('write-gateway');
-const fastify = Fastify({ logger: log });
+const fastify = Fastify({ logger: log, trustProxy: true });
 
 fastify.setValidatorCompiler(validatorCompiler);
 fastify.setSerializerCompiler(serializerCompiler);
@@ -72,6 +73,11 @@ async function main() {
   const natsUrl = process.env.NATS_URL || 'nats://localhost:4222';
   const port = parseInt(process.env.PORT || '3000', 10);
   const host = process.env.HOST || '0.0.0.0';
+
+  await fastify.register(rateLimit, {
+    max: 100,
+    timeWindow: '1 minute',
+  });
 
   await writeClient.connect(natsUrl);
 
