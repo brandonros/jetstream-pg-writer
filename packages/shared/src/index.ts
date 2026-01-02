@@ -7,6 +7,7 @@ export interface WriteRequest {
 export interface WriteResponse {
   success: boolean;
   operationId: string;
+  entityId?: string;  // The actual entity ID (user_id, order_id)
   error?: string;
 }
 
@@ -37,14 +38,14 @@ export type TableDataMap = {
 
 // Row types (what the database returns)
 export interface UserRow {
-  id: string;
+  user_id: string;
   name: string;
   email: string;
   created_at: string;
 }
 
 export interface OrderRow {
-  id: string;
+  order_id: string;
   user_id: string;
   items: OrderItem[];
   total: string; // NUMERIC comes back as string

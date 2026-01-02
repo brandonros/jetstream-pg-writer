@@ -51,23 +51,33 @@ Debezium Server connects to Postgres logical replication and streams WAL changes
 
 The reader creates a durable JetStream consumer and invalidates Redis keys when CDC events arrive. This captures ALL changes (application writes, migrations, manual SQL) without requiring manual invalidation code.
 
-### Write consistency
+## Idempotency
 
-The consumer waits for CDC confirmation before replying to the producer:
+Writes are idempotent via a `write_operations` table:
 
-1. Consumer subscribes to `cdc.confirm.{operationId}`
-2. Consumer inserts row to Postgres
-3. Debezium captures WAL change → publishes to `cdc.public.{table}`
-4. Reader invalidates Redis → publishes to `cdc.confirm.{operationId}`
-5. Consumer receives confirmation → replies to producer
-6. Producer returns HTTP 201
+```sql
+CREATE TABLE write_operations (
+  operation_id UUID PRIMARY KEY,
+  entity_table TEXT NOT NULL,
+  entity_id UUID NOT NULL,
+  op_type TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
 
-This ensures clients never read stale cache data after a successful write.
+Flow:
+1. Client sends write request with `operationId`
+2. Consumer attempts `INSERT INTO write_operations` (idempotency check)
+3. If duplicate → return existing `entity_id` (idempotent success)
+4. If new → insert domain row, return new `entity_id`
+5. Both operations in same transaction
+
+This separates transport concerns (idempotency) from domain concerns (entity IDs).
 
 ## Key design decisions
 
-- **operationId = entity id** — The idempotency key becomes the primary key. No separate tracking table needed.
-- **PK constraint = idempotency** — Duplicate inserts fail with unique violation, treated as success.
+- **Separate operation_id from entity_id** — `write_operations` table tracks idempotency. Domain tables use natural IDs (`user_id`, `order_id`).
+- **Transaction-based idempotency** — Idempotency check and domain write in same transaction. No CDC waiting.
 - **Filtered consumers** — Each table has its own JetStream consumer (`users-writer`, `orders-writer`).
 - **FK enforced** — Orders require valid user_id. Frontend tracks created users.
-- **Cache invalidation via CDC** — Debezium captures Postgres WAL changes and publishes to JetStream. Reader consumes CDC events and invalidates Redis keys. No manual invalidation code needed.
+- **Cache invalidation via CDC** — Debezium captures Postgres WAL changes and publishes to JetStream. Reader consumes CDC events and invalidates Redis keys. Eventually consistent.

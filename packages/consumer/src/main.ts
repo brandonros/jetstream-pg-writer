@@ -1,5 +1,6 @@
-import { connect, AckPolicy, StorageType, DiscardPolicy } from 'nats';
+import { connect, AckPolicy } from 'nats';
 import pg from 'pg';
+import { Redis } from 'ioredis';
 import { UsersHandler } from './handlers/users.js';
 import { OrdersHandler } from './handlers/orders.js';
 
@@ -13,8 +14,10 @@ const HANDLERS = [
 async function main() {
   const natsUrl = process.env.NATS_URL || 'nats://localhost:4222';
   const databaseUrl = process.env.DATABASE_URL || 'postgres://jetstream:jetstream@localhost:5432/jetstream';
+  const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 
   const db = new Pool({ connectionString: databaseUrl });
+  const redis = new Redis(redisUrl);
   const nc = await connect({ servers: natsUrl });
   const js = nc.jetstream();
   const jsm = await nc.jetstreamManager();
@@ -30,20 +33,6 @@ async function main() {
     console.log('Created WRITES stream');
   } catch {
     console.log('WRITES stream already exists');
-  }
-
-  // CDC confirmations stream (memory, short retention)
-  try {
-    await jsm.streams.add({
-      name: 'CDC_CONFIRMS',
-      subjects: ['cdc.confirm.>'],
-      storage: StorageType.Memory,
-      max_age: 60_000_000_000, // 60 seconds in nanoseconds
-      discard: DiscardPolicy.Old,
-    });
-    console.log('Created CDC_CONFIRMS stream');
-  } catch {
-    console.log('CDC_CONFIRMS stream already exists');
   }
 
   // Create filtered consumers for each handler
@@ -64,8 +53,8 @@ async function main() {
 
   // Instantiate handlers
   const handlers = [
-    new UsersHandler(nc, js, db),
-    new OrdersHandler(nc, js, db),
+    new UsersHandler(nc, js, db, redis),
+    new OrdersHandler(nc, js, db, redis),
   ];
 
   // Graceful shutdown
@@ -73,6 +62,7 @@ async function main() {
     console.log('Shutting down...');
     await nc.close();
     await db.end();
+    await redis.quit();
     process.exit(0);
   };
 

@@ -1,4 +1,4 @@
-import { NatsConnection, StringCodec, JetStreamClient, AckPolicy, DeliverPolicy, StorageType, DiscardPolicy } from 'nats';
+import { NatsConnection, StringCodec, JetStreamClient, AckPolicy, DeliverPolicy } from 'nats';
 import type { Redis } from 'ioredis';
 import type { FastifyBaseLogger } from 'fastify';
 
@@ -6,9 +6,9 @@ const sc = StringCodec();
 
 // Debezium CDC event structure (after ExtractNewRecordState transform)
 interface CdcEvent {
-  // Record fields
-  id?: string;
+  // Record fields (column names match new schema)
   user_id?: string;
+  order_id?: string;
   // Metadata added by transform
   __op: 'c' | 'u' | 'd' | 'r'; // create, update, delete, read (snapshot)
   __table: string;
@@ -45,20 +45,6 @@ export async function startCdcConsumer({ nc, js, redis, log }: CdcConsumerOption
       log.info(`Waiting for CDC stream (attempt ${i + 1}/${maxRetries})...`);
       await new Promise((resolve) => setTimeout(resolve, retryDelay));
     }
-  }
-
-  // Ensure CDC_CONFIRMS stream exists (for durable confirmations back to consumer)
-  try {
-    await jsm.streams.add({
-      name: 'CDC_CONFIRMS',
-      subjects: ['cdc.confirm.>'],
-      storage: StorageType.Memory,
-      max_age: 60_000_000_000, // 60 seconds
-      discard: DiscardPolicy.Old,
-    });
-    log.info('Created CDC_CONFIRMS stream');
-  } catch {
-    log.info('CDC_CONFIRMS stream already exists');
   }
 
   // Create a durable consumer for cache invalidation
@@ -101,13 +87,6 @@ export async function startCdcConsumer({ nc, js, redis, log }: CdcConsumerOption
           await redis.del(`orders:user:${userId}`);
           log.info({ userId }, 'Invalidated orders cache');
         }
-      }
-
-      // Publish confirmation to JetStream so the writer can unblock (durable)
-      const operationId = event.id;
-      if (operationId) {
-        await js.publish(`cdc.confirm.${operationId}`, sc.encode(JSON.stringify({ invalidated: true })));
-        log.info({ operationId }, 'Published CDC confirmation');
       }
 
       msg.ack();

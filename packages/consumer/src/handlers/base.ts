@@ -1,5 +1,6 @@
-import { JetStreamClient, JsMsg, StringCodec, NatsConnection, ConsumerMessages } from 'nats';
+import { JetStreamClient, JsMsg, StringCodec, NatsConnection } from 'nats';
 import pg from 'pg';
+import type { Redis } from 'ioredis';
 import type { WriteRequest, WriteResponse } from '@jetstream-pg-writer/shared';
 
 const sc = StringCodec();
@@ -7,21 +8,24 @@ const sc = StringCodec();
 // Postgres error code for unique_violation
 const PG_UNIQUE_VIOLATION = '23505';
 
-// Timeout waiting for CDC confirmation (ms)
-const CDC_CONFIRM_TIMEOUT_MS = 10_000;
+export interface InsertResult {
+  entityId: string;
+}
 
 export abstract class BaseHandler<T> {
   protected js: JetStreamClient;
   protected nc: NatsConnection;
   protected db: pg.Pool;
+  protected redis: Redis;
 
   abstract readonly table: string;
   abstract readonly consumerName: string;
 
-  constructor(nc: NatsConnection, js: JetStreamClient, db: pg.Pool) {
+  constructor(nc: NatsConnection, js: JetStreamClient, db: pg.Pool, redis: Redis) {
     this.nc = nc;
     this.js = js;
     this.db = db;
+    this.redis = redis;
   }
 
   async start() {
@@ -44,17 +48,18 @@ export abstract class BaseHandler<T> {
     let response: WriteResponse;
 
     try {
-      const written = await this.processWrite(request.operationId, request.data as T);
+      const result = await this.processWrite(request.operationId, request.data as T);
 
       response = {
         success: true,
         operationId: request.operationId,
+        entityId: result.entityId,
       };
 
-      if (!written) {
-        console.log(`[${this.table}] Duplicate skipped: ${request.operationId}`);
+      if (result.entityId) {
+        console.log(`[${this.table}] Completed: ${request.operationId} -> ${result.entityId}`);
       } else {
-        console.log(`[${this.table}] Completed: ${request.operationId}`);
+        console.log(`[${this.table}] Duplicate skipped: ${request.operationId}`);
       }
 
       msg.ack();
@@ -80,60 +85,57 @@ export abstract class BaseHandler<T> {
     }
   }
 
-  private async processWrite(operationId: string, data: T): Promise<boolean> {
-    // Subscribe BEFORE insert to avoid race with CDC confirmation
-    const { promise, cancel } = this.waitForCdcConfirmation(operationId);
+  private async processWrite(operationId: string, data: T): Promise<{ entityId: string }> {
+    const client = await this.db.connect();
 
     try {
-      await this.insert(this.db, operationId, data);
+      await client.query('BEGIN');
+
+      // Generate entity ID
+      const entityId = crypto.randomUUID();
+
+      // 1. Idempotency check - insert into write_operations first
+      try {
+        await client.query(
+          `INSERT INTO write_operations (operation_id, entity_table, entity_id, op_type)
+           VALUES ($1, $2, $3, $4)`,
+          [operationId, this.table, entityId, 'create']
+        );
+      } catch (error) {
+        await client.query('ROLLBACK');
+        // Duplicate operation - look up existing entity_id
+        if (error instanceof Error && 'code' in error && error.code === PG_UNIQUE_VIOLATION) {
+          const existing = await client.query(
+            'SELECT entity_id FROM write_operations WHERE operation_id = $1',
+            [operationId]
+          );
+          return { entityId: existing.rows[0]?.entity_id ?? '' };
+        }
+        throw error;
+      }
+
+      // 2. Perform the actual domain insert
+      await this.insert(client, entityId, data);
+
+      await client.query('COMMIT');
+
+      // 3. Invalidate cache synchronously (before returning to client)
+      await this.invalidateCache(entityId, data);
+      console.log(`[${this.table}] Cache invalidated`);
+
+      return { entityId };
     } catch (error) {
-      cancel();
-      // PK/unique violation means duplicate - treat as success (no need to wait for CDC)
-      if (error instanceof Error && 'code' in error && error.code === PG_UNIQUE_VIOLATION) {
-        return false;
-      }
+      await client.query('ROLLBACK');
       throw error;
+    } finally {
+      client.release();
     }
-
-    // Wait for CDC to confirm cache invalidation before returning
-    await promise;
-    return true;
   }
 
-  private waitForCdcConfirmation(operationId: string): { promise: Promise<void>; cancel: () => void } {
-    const subject = `cdc.confirm.${operationId}`;
-    let cancelled = false;
-    let messages: ConsumerMessages | undefined;
+  protected abstract insert(client: pg.PoolClient, entityId: string, data: T): Promise<void>;
 
-    const promise = (async () => {
-      // Create ephemeral consumer filtered to this specific confirmation
-      const consumer = await this.js.consumers.get('CDC_CONFIRMS', {
-        filterSubjects: [subject],
-      });
-
-      messages = await consumer.fetch({ max_messages: 1, expires: CDC_CONFIRM_TIMEOUT_MS });
-
-      for await (const msg of messages) {
-        if (cancelled) return;
-        msg.ack();
-        console.log(`[${this.table}] CDC confirmed: ${operationId}`);
-        return;
-      }
-
-      if (!cancelled) {
-        throw new Error(`CDC confirmation timeout after ${CDC_CONFIRM_TIMEOUT_MS}ms`);
-      }
-    })();
-
-    const cancel = () => {
-      cancelled = true;
-      messages?.stop();
-    };
-
-    return { promise, cancel };
-  }
-
-  protected abstract insert(db: pg.Pool, operationId: string, data: T): Promise<void>;
+  // Each handler defines which cache keys to invalidate
+  protected abstract invalidateCache(entityId: string, data: T): Promise<void>;
 
   private isRetryable(error: unknown): boolean {
     if (error instanceof Error) {
