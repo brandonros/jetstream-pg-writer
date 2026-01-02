@@ -4,6 +4,17 @@ import type { Logger } from '@jetstream-pg-writer/shared/logger';
 
 const sc = StringCodec();
 
+/**
+ * Publishes writes to JetStream with request-reply for confirmation.
+ *
+ * Why JetStream instead of NATS core request-reply?
+ * - Durability: If the processor is down, writes queue in the stream and land when it recovers.
+ *   With NATS core, writes during outages are lost unless the client retries.
+ * - For high-value writes (orders, user signups), "eventually succeeds" beats "silently lost".
+ * - Idempotency (operationId) ensures duplicate deliveries don't create duplicate records.
+ *
+ * Trade-off: More operational complexity (streams, consumers, ack policies) for write durability.
+ */
 export class WriteClient {
   private nc!: NatsConnection;
   private js!: JetStreamClient;
