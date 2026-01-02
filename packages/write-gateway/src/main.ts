@@ -30,14 +30,12 @@ fastify.post<{ Body: UserData }>('/users', async (request, reply) => {
 
   if (result.success) {
     return reply.status(201).send({
-      operationId: result.operationId,
-      entityId: result.entityId,
+      userId: result.entityId,
     });
   }
 
   return reply.status(500).send({
     error: result.error,
-    operationId: result.operationId,
   });
 });
 
@@ -58,14 +56,12 @@ fastify.post<{ Body: OrderData }>('/orders', async (request, reply) => {
 
   if (result.success) {
     return reply.status(201).send({
-      operationId: result.operationId,
-      entityId: result.entityId,
+      orderId: result.entityId,
     });
   }
 
   return reply.status(500).send({
     error: result.error,
-    operationId: result.operationId,
   });
 });
 

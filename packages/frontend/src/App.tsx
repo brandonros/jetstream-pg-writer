@@ -1,13 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { UserRow, OrderRow } from '@jetstream-pg-writer/shared';
 
-interface ApiResult {
-  success: boolean;
-  operationId?: string;
-  message?: string;
-  error?: string;
-}
-
 export function App() {
   const [results, setResults] = useState<string[]>([]);
   const [users, setUsers] = useState<UserRow[]>([]);
@@ -46,18 +39,21 @@ export function App() {
     try {
       const res = await fetch('/api/write/users', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': crypto.randomUUID(),
+        },
         body: JSON.stringify({
           name: `User ${Math.floor(Math.random() * 1000)}`,
           email: `user${Date.now()}@example.com`,
         }),
       });
-      const data: ApiResult = await res.json();
-      if (data.success !== false && data.operationId) {
-        addResult(`User created: ${data.operationId}`);
+      const data = await res.json();
+      if (data.userId) {
+        addResult(`User created: ${data.userId}`);
         await fetchData();
         if (!selectedUserId) {
-          setSelectedUserId(data.operationId);
+          setSelectedUserId(data.userId);
         }
       } else {
         addResult(`Error: ${data.error}`);
@@ -79,16 +75,19 @@ export function App() {
     try {
       const res = await fetch('/api/write/orders', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': crypto.randomUUID(),
+        },
         body: JSON.stringify({
           userId: selectedUserId,
           items: [{ productId: 'prod-1', quantity: 2, price: 9.99 }],
           total: 19.98,
         }),
       });
-      const data: ApiResult = await res.json();
-      if (data.success !== false) {
-        addResult(`Order created: ${data.operationId} (for user ${selectedUserId.slice(0, 8)}...)`);
+      const data = await res.json();
+      if (data.orderId) {
+        addResult(`Order created: ${data.orderId} (for user ${selectedUserId.slice(0, 8)}...)`);
         await fetchData();
       } else {
         addResult(`Error: ${data.error}`);
