@@ -8,6 +8,11 @@ services:
       - nats-data:/data
       - ./config/nats-server.conf:/nats-server.conf
     command: ["nats-server", "--config", "/nats-server.conf"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8222/healthz || exit 1"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
 
   postgres:
     # postgres 18 was releated on 2025-09-25
@@ -51,7 +56,7 @@ services:
       postgres:
         condition: service_healthy
       nats:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - debezium-data:/debezium/data
     environment:
@@ -77,7 +82,7 @@ services:
       DEBEZIUM_TRANSFORMS: unwrap
       DEBEZIUM_TRANSFORMS_UNWRAP_TYPE: io.debezium.transforms.ExtractNewRecordState
       DEBEZIUM_TRANSFORMS_UNWRAP_DROP_TOMBSTONES: "true"
-      DEBEZIUM_TRANSFORMS_UNWRAP_DELETE_HANDLING_MODE: rewrite
+      DEBEZIUM_TRANSFORMS_UNWRAP_DELETE_HANDLING_MODE: none
       DEBEZIUM_TRANSFORMS_UNWRAP_ADD_FIELDS: op,table,source.ts_ms
       # Format
       DEBEZIUM_FORMAT_KEY: json
@@ -96,10 +101,16 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
-      - nats
+      nats:
+        condition: service_healthy
     environment:
       NATS_URL: nats://nats:4222
       PORT: "3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   write-processor:
     build:
@@ -107,7 +118,7 @@ services:
       dockerfile: packages/write-processor/Dockerfile
     depends_on:
       nats:
-        condition: service_started
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:
@@ -125,7 +136,7 @@ services:
       - "127.0.0.1:3001:3001"
     depends_on:
       nats:
-        condition: service_started
+        condition: service_healthy
       redis:
         condition: service_healthy
       postgres:
@@ -137,6 +148,11 @@ services:
       REDIS_URL: redis://redis:6379
       DATABASE_URL: postgres://jetstream:jetstream@postgres:5432/jetstream
       PORT: "3001"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   frontend:
     build:
@@ -145,8 +161,15 @@ services:
     ports:
       - "0.0.0.0:80:80" # public
     depends_on:
-      - write-gateway
-      - read-api
+      write-gateway:
+        condition: service_healthy
+      read-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80/ || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 volumes:
   nats-data:

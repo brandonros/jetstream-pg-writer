@@ -4,17 +4,15 @@ import type { FastifyBaseLogger } from 'fastify';
 
 const sc = StringCodec();
 
-// Debezium CDC event structure (after ExtractNewRecordState transform)
+// Debezium CDC event structure (after ExtractNewRecordState transform with delete.handling.mode=none)
 interface CdcEvent {
-  // Record fields (column names match new schema)
+  // Record fields (column names match schema)
   user_id?: string;
   order_id?: string;
   // Metadata added by transform
   __op: 'c' | 'u' | 'd' | 'r'; // create, update, delete, read (snapshot)
   __table: string;
   __source_ts_ms: number;
-  // For deletes, __deleted field is added
-  __deleted?: string;
 }
 
 interface CdcConsumerOptions {
@@ -79,16 +77,61 @@ async function consumeCdcEvents(
       const table = msg.subject.split('.').pop();
       const event: CdcEvent = JSON.parse(sc.decode(msg.data));
 
-      log.info({ table, op: event.__op }, 'CDC event received');
+      const op = event.__op;
+
+      log.info({ table, op }, 'CDC event received');
+
+      // 'r' = snapshot read (Debezium initial sync) - ignore, not a real change
+      if (op === 'r') {
+        msg.ack();
+        continue;
+      }
 
       if (table === 'users') {
-        await redis.del('users:all');
-        log.info('Invalidated users:all');
+        switch (op) {
+          case 'c': // create
+            await redis.del('users:all');
+            log.info('Invalidated users:all (new user)');
+            break;
+
+          case 'u': // update
+            await redis.del('users:all');
+            log.info({ userId: event.user_id }, 'Invalidated users:all (user updated)');
+            break;
+
+          case 'd': // delete
+            await redis.del('users:all');
+            if (event.user_id) {
+              await redis.del(`orders:user:${event.user_id}`);
+            }
+            log.info({ userId: event.user_id }, 'Invalidated users:all + user orders (user deleted)');
+            break;
+        }
       } else if (table === 'orders') {
-        await redis.del('orders:all');
-        if (event.user_id) {
-          await redis.del(`orders:user:${event.user_id}`);
-          log.info({ userId: event.user_id }, 'Invalidated orders cache');
+        switch (op) {
+          case 'c':
+            await redis.del('orders:all');
+            if (event.user_id) {
+              await redis.del(`orders:user:${event.user_id}`);
+            }
+            log.info({ userId: event.user_id }, 'Invalidated orders cache (new order)');
+            break;
+
+          case 'u':
+            await redis.del('orders:all');
+            if (event.user_id) {
+              await redis.del(`orders:user:${event.user_id}`);
+            }
+            log.info({ userId: event.user_id }, 'Invalidated orders cache (order updated)');
+            break;
+
+          case 'd':
+            await redis.del('orders:all');
+            if (event.user_id) {
+              await redis.del(`orders:user:${event.user_id}`);
+            }
+            log.info({ userId: event.user_id }, 'Invalidated orders cache (order deleted)');
+            break;
         }
       }
 

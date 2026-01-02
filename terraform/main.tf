@@ -14,7 +14,7 @@ provider "vultr" {
 locals {
   install_docker        = true
   deploy_app            = true
-  ssh_authorized_key = file("~/.ssh/id_rsa.pub")
+  ssh_authorized_key    = file("~/.ssh/id_rsa.pub")
   # echo "hihaters" | openssl passwd -6 -salt ovSvGqIVXC9lTasZ -in -
   user_password_hash = "$6$ovSvGqIVXC9lTasZ$T3YJyx/ew41tndVvqPCV3xZ6tpGTQyQJNXfn/mQ7s9xfvjUy.1g2xLccyW9CattET53xi9Z4REzoNY7iO3Bhw1"
 }

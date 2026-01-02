@@ -25,11 +25,25 @@ async function getCached<T>(key: string, fetcher: () => Promise<T>): Promise<T> 
   return data;
 }
 
-fastify.get('/health', async () => {
-  return {
-    status: 'ok',
-    redis: redis.status === 'ready',
-  };
+fastify.get('/health', async (_, reply) => {
+  const redisOk = redis.status === 'ready';
+  let postgresOk = false;
+
+  try {
+    await db.query('SELECT 1');
+    postgresOk = true;
+  } catch {
+    // postgres check failed
+  }
+
+  const status = redisOk && postgresOk ? 'ok' : 'degraded';
+  const statusCode = status === 'ok' ? 200 : 503;
+
+  return reply.status(statusCode).send({
+    status,
+    redis: redisOk,
+    postgres: postgresOk,
+  });
 });
 
 fastify.get('/users', async () => {
