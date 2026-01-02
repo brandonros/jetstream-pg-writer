@@ -38,6 +38,17 @@ async function main() {
     log.info('WRITES stream already exists');
   }
 
+  // Create DLQ stream for failed messages
+  try {
+    await jsm.streams.add({
+      name: 'WRITES_DLQ',
+      subjects: ['writes-dlq.>'],
+    });
+    log.info('Created WRITES_DLQ stream');
+  } catch {
+    log.info('WRITES_DLQ stream already exists');
+  }
+
   // Create filtered consumers for each handler
   for (const { name, filterSubject } of HANDLERS) {
     try {

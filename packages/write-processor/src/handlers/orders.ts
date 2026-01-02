@@ -13,8 +13,8 @@ export class OrdersHandler extends BaseHandler<OrderData> {
     );
   }
 
-  protected async invalidateCache(): Promise<void> {
-    // All order cache keys (including user-specific ones) are tracked under 'orders' namespace
-    await this.invalidateNamespace('orders');
+  protected async invalidateCache(operationId: string, _entityId: string, _data: OrderData): Promise<void> {
+    const deleted = await this.invalidateNamespace('orders');
+    this.log.info({ operationId, namespace: 'orders', keysDeleted: deleted }, 'Cache invalidated');
   }
 }

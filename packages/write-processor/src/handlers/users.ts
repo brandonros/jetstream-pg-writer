@@ -13,7 +13,8 @@ export class UsersHandler extends BaseHandler<UserData> {
     );
   }
 
-  protected async invalidateCache(): Promise<void> {
-    await this.invalidateNamespace('users');
+  protected async invalidateCache(operationId: string, _entityId: string, _data: UserData): Promise<void> {
+    const deleted = await this.invalidateNamespace('users');
+    this.log.info({ operationId, namespace: 'users', keysDeleted: deleted }, 'Cache invalidated');
   }
 }

@@ -120,7 +120,7 @@ async function consumeCdcEvents(
       msg.ack();
     } catch (err) {
       log.error({ err }, 'Failed to process CDC event');
-      msg.nak();
+      msg.nak(1000);
     }
   }
 }

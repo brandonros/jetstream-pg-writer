@@ -33,6 +33,7 @@ export interface WriteRequest {
   operationId: string;
   table: SupportedTable;
   data: Record<string, unknown>;
+  queuedAt: string; // ISO8601 timestamp from gateway
 }
 
 export interface WriteResponse {

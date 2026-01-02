@@ -8,6 +8,9 @@ import { invalidateNamespace } from '@jetstream-pg-writer/shared/cache';
 
 const sc = StringCodec();
 
+// Consumer max_deliver is 3, so redeliveryCount 2 = final attempt (0, 1, 2)
+const MAX_REDELIVERY_COUNT = 2;
+
 // Postgres error codes - safelist of retryable errors
 // Using safelist (only retry known-transient) is safer than blocklist
 const PG_UNIQUE_VIOLATION = '23505';
@@ -61,11 +64,23 @@ export abstract class BaseHandler<T> {
       await this.processWrite(request.operationId, request.data as T);
       msg.ack();
     } catch (error) {
-      // Retryable errors (connection, timeout) → nak for retry
+      const redeliveryCount = msg.info.redeliveryCount;
+      const isLastAttempt = redeliveryCount >= MAX_REDELIVERY_COUNT;
+
+      // Retryable errors (connection, timeout) → nak for retry (unless exhausted)
       // Non-retryable errors (constraint violations) → ack (failure already recorded in DB)
       if (this.isRetryable(error)) {
-        this.log.warn({ table: this.table, operationId: request.operationId, err: error }, 'Retryable error, will retry');
-        msg.nak();
+        if (isLastAttempt) {
+          // Final attempt failed - send to DLQ for investigation/replay.
+          // We don't recordFailure() here because if DB is unreachable (the likely cause),
+          // that call would also fail. Client sees 'pending' but can't poll anyway.
+          // When DB recovers, ops can replay from DLQ.
+          await this.publishToDlq(msg, request, error);
+          msg.ack();
+        } else {
+          this.log.warn({ table: this.table, operationId: request.operationId, redeliveryCount, err: error }, 'Retryable error, will retry');
+          msg.nak(1000);
+        }
       } else {
         this.log.error({ table: this.table, operationId: request.operationId, err: error }, 'Non-retryable error, failure recorded');
         msg.ack();
@@ -111,10 +126,9 @@ export abstract class BaseHandler<T> {
 
       // 4. Invalidate cache (non-fatal)
       try {
-        await this.invalidateCache(entityId, data);
-        this.log.info({ table: this.table }, 'Cache invalidated');
+        await this.invalidateCache(operationId, entityId, data);
       } catch (error) {
-        this.log.warn({ table: this.table, err: error }, 'Cache invalidation failed (non-fatal)');
+        this.log.warn({ table: this.table, operationId, err: error }, 'Cache invalidation failed (non-fatal)');
       }
     } catch (error) {
       await client.query('ROLLBACK');
@@ -150,7 +164,7 @@ export abstract class BaseHandler<T> {
   protected abstract insert(client: pg.PoolClient, entityId: string, data: T): Promise<void>;
 
   // Each handler defines which cache keys to invalidate
-  protected abstract invalidateCache(entityId: string, data: T): Promise<void>;
+  protected abstract invalidateCache(operationId: string, entityId: string, data: T): Promise<void>;
 
   // Expose invalidateNamespace helper to subclasses
   protected invalidateNamespace(namespace: 'users' | 'orders'): Promise<number> {
@@ -164,5 +178,35 @@ export abstract class BaseHandler<T> {
       return PG_RETRYABLE_CODES.has(error.code);
     }
     return false;
+  }
+
+  /**
+   * Publish failed message to DLQ for investigation/manual replay.
+   * Returns only after JetStream confirms the message is persisted (PubAck).
+   * Caller should ack the original message after this succeeds - we've handled
+   * it by routing to DLQ, so the original stream should stop tracking it.
+   */
+  private async publishToDlq(msg: JsMsg, request: WriteRequest, error: unknown): Promise<void> {
+    const dlqPayload = {
+      originalSubject: msg.subject,
+      operationId: request.operationId,
+      table: request.table,
+      data: request.data,
+      queuedAt: request.queuedAt,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      failedAt: new Date().toISOString(),
+      redeliveryCount: msg.info.redeliveryCount,
+    };
+
+    // js.publish returns PubAck - throws if stream rejects or times out
+    const ack = await this.js.publish(
+      `writes-dlq.${this.table}`,
+      sc.encode(JSON.stringify(dlqPayload))
+    );
+
+    this.log.error(
+      { table: this.table, operationId: request.operationId, dlqSeq: ack.seq, redeliveryCount: msg.info.redeliveryCount },
+      'Message sent to DLQ after exhausting retries'
+    );
   }
 }

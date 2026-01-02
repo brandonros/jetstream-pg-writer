@@ -51,6 +51,7 @@ app.post('/users', {
   return reply.status(202).send({
     status: 'pending',
     operationId: idempotencyKey,
+    acceptedAt: new Date().toISOString(),
   });
 });
 
@@ -80,6 +81,7 @@ app.post('/orders', {
   return reply.status(202).send({
     status: 'pending',
     operationId: idempotencyKey,
+    acceptedAt: new Date().toISOString(),
   });
 });
 

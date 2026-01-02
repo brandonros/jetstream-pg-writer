@@ -103,6 +103,7 @@ export class WriteClient {
       operationId,
       table,
       data: data as unknown as Record<string, unknown>,
+      queuedAt: new Date().toISOString(),
     };
 
     this.inFlight++;
