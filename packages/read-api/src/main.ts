@@ -14,6 +14,15 @@ let redis: Redis;
 
 const CACHE_TTL_SECONDS = 30;
 
+/**
+ * Cache-aside pattern with Redis.
+ *
+ * TRADEOFF: Redis failure = read failure. This is intentional:
+ * - Redis is a required infrastructure component, not an optimization
+ * - Silently falling back to Postgres would mask infrastructure issues
+ * - Health check already reports Redis status for alerting
+ * - If Redis-optional behavior is needed, wrap calls in try/catch with metrics
+ */
 async function getCached<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
   const cached = await redis.get(key);
   if (cached) {

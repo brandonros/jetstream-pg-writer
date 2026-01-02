@@ -77,6 +77,14 @@ export abstract class BaseHandler<T> {
         error: errMsg,
       };
 
+      // TRADEOFF: No Dead Letter Queue. After max_deliver (3 retries), messages are dropped.
+      // This is acceptable because:
+      // - Writes block until ack'd - client already knows if their write failed
+      // - DLQ would store failures that clients already received error responses for
+      // - Non-retryable errors (constraint violations, bad data) aren't worth retrying anyway
+      // - Retryable errors (connection issues) usually succeed on retry
+      //
+      // If async writes are added later, implement DLQ for undeliverable messages.
       if (this.isRetryable(error)) {
         msg.nak();
       } else {

@@ -4,7 +4,7 @@ import type { Logger } from '@jetstream-pg-writer/shared/logger';
 
 const sc = StringCodec();
 
-// Debezium CDC event structure (after ExtractNewRecordState transform with delete.handling.mode=none)
+// Debezium CDC event structure (after ExtractNewRecordState transform with delete.handling.mode=rewrite)
 interface CdcEvent {
   // Record fields (column names match schema)
   user_id?: string;
@@ -13,6 +13,7 @@ interface CdcEvent {
   __op: 'c' | 'u' | 'd' | 'r'; // create, update, delete, read (snapshot)
   __table: string;
   __source_ts_ms: number;
+  __deleted?: boolean; // Present on delete events with rewrite mode
 }
 
 interface CdcConsumerOptions {
@@ -49,11 +50,21 @@ async function setupCdcConsumer({ nc, js, log }: Omit<CdcConsumerOptions, 'redis
   }
 
   // Create durable consumer
+  // TRADEOFF: DeliverPolicy.All replays entire CDC history on first consumer creation.
+  // This is acceptable because:
+  // - Cache invalidation is idempotent (deleting a key twice is fine)
+  // - Only happens on first deploy or if consumer is deleted
+  // - Durable consumer tracks position after initial creation
+  // - Write-processor does sync invalidation for its own writes anyway
+  // - Cache has 30s TTL so stale data is bounded regardless
+  //
+  // Alternative: DeliverPolicy.New skips history but may miss events if consumer
+  // is recreated while CDC events are in flight.
   try {
     await jsm.consumers.add(streamName, {
       durable_name: consumerName,
       ack_policy: AckPolicy.Explicit,
-      deliver_policy: DeliverPolicy.All, // Process all events from stream start
+      deliver_policy: DeliverPolicy.All,
       filter_subjects: ['cdc.public.users', 'cdc.public.orders'],
       idle_heartbeat: 5_000_000_000, // 5s - detect stalled consumers
       flow_control: true, // Backpressure support for horizontal scaling
