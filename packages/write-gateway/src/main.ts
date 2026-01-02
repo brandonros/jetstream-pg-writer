@@ -15,18 +15,23 @@ fastify.get('/health', async () => {
 
 // Create user
 fastify.post<{ Body: UserData }>('/users', async (request, reply) => {
+  const idempotencyKey = request.headers['idempotency-key'];
+  if (!idempotencyKey || typeof idempotencyKey !== 'string') {
+    return reply.status(400).send({ error: 'Idempotency-Key header is required' });
+  }
+
   const { name, email } = request.body;
 
   if (!name || !email) {
     return reply.status(400).send({ error: 'name and email are required' });
   }
 
-  const result = await writeClient.write('users', { name, email });
+  const result = await writeClient.write('users', { name, email }, idempotencyKey);
 
   if (result.success) {
     return reply.status(201).send({
       operationId: result.operationId,
-      message: 'User created',
+      entityId: result.entityId,
     });
   }
 
@@ -38,18 +43,23 @@ fastify.post<{ Body: UserData }>('/users', async (request, reply) => {
 
 // Create order
 fastify.post<{ Body: OrderData }>('/orders', async (request, reply) => {
+  const idempotencyKey = request.headers['idempotency-key'];
+  if (!idempotencyKey || typeof idempotencyKey !== 'string') {
+    return reply.status(400).send({ error: 'Idempotency-Key header is required' });
+  }
+
   const { userId, items, total } = request.body;
 
   if (!userId || !items || total === undefined) {
     return reply.status(400).send({ error: 'userId, items, and total are required' });
   }
 
-  const result = await writeClient.write('orders', { userId, items, total });
+  const result = await writeClient.write('orders', { userId, items, total }, idempotencyKey);
 
   if (result.success) {
     return reply.status(201).send({
       operationId: result.operationId,
-      message: 'Order created',
+      entityId: result.entityId,
     });
   }
 

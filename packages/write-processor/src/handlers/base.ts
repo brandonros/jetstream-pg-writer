@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { JetStreamClient, JsMsg, StringCodec, NatsConnection } from 'nats';
 import pg from 'pg';
 import type { Redis } from 'ioredis';
@@ -92,7 +93,7 @@ export abstract class BaseHandler<T> {
       await client.query('BEGIN');
 
       // Generate entity ID
-      const entityId = crypto.randomUUID();
+      const entityId = randomUUID();
 
       // 1. Idempotency check - insert into write_operations first
       try {
@@ -105,11 +106,15 @@ export abstract class BaseHandler<T> {
         await client.query('ROLLBACK');
         // Duplicate operation - look up existing entity_id
         if (error instanceof Error && 'code' in error && error.code === PG_UNIQUE_VIOLATION) {
-          const existing = await client.query(
+          const existing = await client.query<{ entity_id: string }>(
             'SELECT entity_id FROM write_operations WHERE operation_id = $1',
             [operationId]
           );
-          return { entityId: existing.rows[0]?.entity_id ?? '' };
+          const entityId = existing.rows[0]?.entity_id;
+          if (!entityId) {
+            throw new Error(`Idempotency record not found for operation ${operationId}`);
+          }
+          return { entityId };
         }
         throw error;
       }

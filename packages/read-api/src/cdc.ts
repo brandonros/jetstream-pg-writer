@@ -104,8 +104,9 @@ export async function startCdcConsumer({ nc, js, redis, log }: CdcConsumerOption
   const messages = await setupCdcConsumer({ nc, js, log });
   log.info('CDC consumer ready, listening for events');
 
-  // Run consumption loop in background
+  // Run consumption loop - exit process on failure (let orchestrator restart)
   consumeCdcEvents(messages, redis, log).catch((err) => {
-    log.error({ err }, 'CDC consumer loop failed');
+    log.error({ err }, 'CDC consumer loop failed, exiting');
+    process.exit(1);
   });
 }

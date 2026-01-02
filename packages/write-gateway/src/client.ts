@@ -21,13 +21,13 @@ export class WriteClient {
   async write<T extends SupportedTable>(
     table: T,
     data: TableDataMap[T],
+    operationId: string,
     timeoutMs = 30000
   ): Promise<WriteResponse> {
     if (!this.connected) {
       throw new Error('WriteClient not connected');
     }
 
-    const operationId = crypto.randomUUID();
     const request: WriteRequest = {
       operationId,
       table,

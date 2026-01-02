@@ -19,12 +19,13 @@ for migration in "$MIGRATIONS_DIR"/*.sql; do
   version=$(basename "$migration")
 
   # Check if already applied (schema_migrations may not exist yet for 000)
-  applied=$($PSQL -tAc "SELECT 1 FROM schema_migrations WHERE version = '$version'" 2>/dev/null || echo "")
+  # Use -v to pass variable safely, avoiding SQL injection
+  applied=$($PSQL -v version="$version" -tAc "SELECT 1 FROM schema_migrations WHERE version = :'version'" 2>/dev/null || echo "")
 
   if [ -z "$applied" ]; then
     echo "Applying: $version"
     $PSQL -f "$migration"
-    $PSQL -c "INSERT INTO schema_migrations (version) VALUES ('$version')"
+    $PSQL -v version="$version" -c "INSERT INTO schema_migrations (version) VALUES (:'version')"
   else
     echo "Skipping: $version (already applied)"
   fi
