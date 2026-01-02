@@ -89,6 +89,13 @@ export async function startCdcConsumer({ nc, js, redis, log }: CdcConsumerOption
         }
       }
 
+      // Publish confirmation so the writer can unblock
+      const operationId = event.id;
+      if (operationId) {
+        nc.publish(`cdc.confirm.${operationId}`, sc.encode(JSON.stringify({ invalidated: true })));
+        log.info({ operationId }, 'Published CDC confirmation');
+      }
+
       msg.ack();
     } catch (err) {
       log.error({ err }, 'Failed to process CDC event');

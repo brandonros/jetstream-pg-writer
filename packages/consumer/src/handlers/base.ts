@@ -7,6 +7,9 @@ const sc = StringCodec();
 // Postgres error code for unique_violation
 const PG_UNIQUE_VIOLATION = '23505';
 
+// Timeout waiting for CDC confirmation (ms)
+const CDC_CONFIRM_TIMEOUT_MS = 100_000;
+
 export abstract class BaseHandler<T> {
   protected js: JetStreamClient;
   protected nc: NatsConnection;
@@ -78,17 +81,54 @@ export abstract class BaseHandler<T> {
   }
 
   private async processWrite(operationId: string, data: T): Promise<boolean> {
+    // Subscribe BEFORE insert to avoid race with CDC confirmation
+    const { promise, cancel } = this.waitForCdcConfirmation(operationId);
+
     try {
       await this.insert(this.db, operationId, data);
-      // Cache invalidation now handled by Debezium CDC → JetStream → reader
-      return true;
     } catch (error) {
-      // PK/unique violation means duplicate - treat as success
+      cancel();
+      // PK/unique violation means duplicate - treat as success (no need to wait for CDC)
       if (error instanceof Error && 'code' in error && error.code === PG_UNIQUE_VIOLATION) {
         return false;
       }
       throw error;
     }
+
+    // Wait for CDC to confirm cache invalidation before returning
+    await promise;
+    return true;
+  }
+
+  private waitForCdcConfirmation(operationId: string): { promise: Promise<void>; cancel: () => void } {
+    const subject = `cdc.confirm.${operationId}`;
+    let timeoutId: NodeJS.Timeout;
+    let sub: ReturnType<NatsConnection['subscribe']>;
+
+    const promise = new Promise<void>((resolve, reject) => {
+      timeoutId = setTimeout(() => {
+        sub.unsubscribe();
+        reject(new Error(`CDC confirmation timeout after ${CDC_CONFIRM_TIMEOUT_MS}ms`));
+      }, CDC_CONFIRM_TIMEOUT_MS);
+
+      sub = this.nc.subscribe(subject, { max: 1 });
+
+      (async () => {
+        for await (const _msg of sub) {
+          clearTimeout(timeoutId);
+          console.log(`[${this.table}] CDC confirmed: ${operationId}`);
+          resolve();
+          break;
+        }
+      })().catch(reject);
+    });
+
+    const cancel = () => {
+      clearTimeout(timeoutId);
+      sub?.unsubscribe();
+    };
+
+    return { promise, cancel };
   }
 
   protected abstract insert(db: pg.Pool, operationId: string, data: T): Promise<void>;
