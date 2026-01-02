@@ -2,8 +2,8 @@ services:
   nats:
     image: nats:2-alpine
     ports:
-      - "4222:4222"
-      - "8222:8222"
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
     volumes:
       - nats-data:/data
       - ./config/nats-server.conf:/nats-server.conf
@@ -94,7 +94,7 @@ services:
       context: .
       dockerfile: packages/write-gateway/Dockerfile
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       - nats
     environment:
@@ -122,7 +122,7 @@ services:
       context: .
       dockerfile: packages/read-api/Dockerfile
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     depends_on:
       nats:
         condition: service_started
@@ -143,7 +143,7 @@ services:
       context: .
       dockerfile: packages/frontend/Dockerfile
     ports:
-      - "80:80"
+      - "0.0.0.0:80:80" # public
     depends_on:
       - write-gateway
       - read-api
