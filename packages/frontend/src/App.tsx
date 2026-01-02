@@ -30,7 +30,7 @@ export function App() {
       setUsers(usersData.users || []);
       setOrders(ordersData.orders || []);
       if (usersData.users?.length > 0 && !selectedUserId) {
-        setSelectedUserId(usersData.users[0].id);
+        setSelectedUserId(usersData.users[0].user_id);
       }
     } catch (err) {
       addResult(`Error loading data: ${err instanceof Error ? err.message : 'Unknown error'}`);

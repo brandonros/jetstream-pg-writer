@@ -35,7 +35,7 @@ fastify.get('/health', async () => {
 fastify.get('/users', async () => {
   const users = await getCached<UserRow[]>('users:all', async () => {
     const result = await db.query<UserRow>(
-      'SELECT id, name, email, created_at FROM users ORDER BY created_at DESC'
+      'SELECT user_id, name, email, created_at FROM users ORDER BY created_at DESC'
     );
     return result.rows;
   });
@@ -50,14 +50,14 @@ fastify.get<{ Querystring: { userId?: string } }>('/orders', async (request) => 
   const orders = await getCached<OrderRow[]>(cacheKey, async () => {
     if (userId) {
       const result = await db.query<OrderRow>(
-        'SELECT id, user_id, items, total, created_at FROM orders WHERE user_id = $1 ORDER BY created_at DESC',
+        'SELECT order_id, user_id, items, total, created_at FROM orders WHERE user_id = $1 ORDER BY created_at DESC',
         [userId]
       );
       return result.rows;
     }
 
     const result = await db.query<OrderRow>(
-      'SELECT id, user_id, items, total, created_at FROM orders ORDER BY created_at DESC'
+      'SELECT order_id, user_id, items, total, created_at FROM orders ORDER BY created_at DESC'
     );
     return result.rows;
   });
