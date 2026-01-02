@@ -50,6 +50,7 @@ export abstract class BaseHandler<T> {
     this.log.info({ table: this.table, operationId: request.operationId }, 'Processing write');
 
     let response: WriteResponse;
+    let shouldAck = true;
 
     try {
       const result = await this.processWrite(request.operationId, request.data as T);
@@ -65,8 +66,6 @@ export abstract class BaseHandler<T> {
       } else {
         this.log.info({ table: this.table, operationId: request.operationId }, 'Duplicate skipped');
       }
-
-      msg.ack();
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : 'Unknown error';
       this.log.error({ table: this.table, operationId: request.operationId, err: errMsg }, 'Write failed');
@@ -85,15 +84,27 @@ export abstract class BaseHandler<T> {
       // - Retryable errors (connection issues) usually succeed on retry
       //
       // If async writes are added later, implement DLQ for undeliverable messages.
-      if (this.isRetryable(error)) {
-        msg.nak();
-      } else {
-        msg.ack();
-      }
+      shouldAck = !this.isRetryable(error);
     }
 
+    // Reply BEFORE ack/nak. If we crash after reply but before ack:
+    // - Client got confirmation (good)
+    // - JetStream redelivers (no ack received)
+    // - Idempotency check returns existing entity_id
+    // - Duplicate reply sent (harmless - same content, client may have timed out anyway)
+    //
+    // If we ack'd first and crashed before reply:
+    // - Write succeeded, message won't redeliver
+    // - Client never learns outcome, times out, may retry with new idempotency key
+    // - That's the bug we're avoiding.
     if (replyTo) {
       this.nc.publish(replyTo, sc.encode(JSON.stringify(response)));
+    }
+
+    if (shouldAck) {
+      msg.ack();
+    } else {
+      msg.nak();
     }
   }
 

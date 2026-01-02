@@ -81,3 +81,12 @@ This separates transport concerns (idempotency) from domain concerns (entity IDs
 - **Filtered consumers** — Each table has its own JetStream consumer (`users-writer`, `orders-writer`).
 - **FK enforced** — Orders require valid user_id. Frontend tracks created users.
 - **Cache invalidation via CDC** — Debezium captures Postgres WAL changes and publishes to JetStream. Reader consumes CDC events and invalidates Redis keys. Eventually consistent.
+
+## Limitations
+
+This is a proof-of-concept for learning, not a production template.
+
+- **Complexity vs. scale mismatch** — Two CRUD tables don't need NATS, Debezium, and Redis. A direct HTTP→Postgres write would be simpler with identical semantics for this workload.
+- **Sync-over-async** — The request-reply pattern blocks waiting for a response, so JetStream durability doesn't help when the processor is down (client times out anyway).
+- **No cleanup** — The `write_operations` table grows forever.
+- **Redis required** — Read path fails completely if Redis is down; no fallback to Postgres.

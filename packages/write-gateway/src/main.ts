@@ -22,22 +22,6 @@ app.get('/health', async (_request, reply) => {
   return reply.status(503).send({ status: 'unhealthy' });
 });
 
-// Backpressure: reject writes when queue is too deep
-const MAX_QUEUE_DEPTH = 1000;
-
-app.addHook('preHandler', async (request, reply) => {
-  if (request.method !== 'POST') return;
-
-  const depth = await writeClient.getQueueDepth();
-  if (depth > MAX_QUEUE_DEPTH) {
-    log.warn({ depth, max: MAX_QUEUE_DEPTH }, 'Queue depth exceeded, rejecting request');
-    return reply.status(503).send({
-      error: 'Service overloaded, retry later',
-      retryAfter: 5,
-    });
-  }
-});
-
 // Create user
 app.post('/users', {
   schema: { body: UserDataSchema },

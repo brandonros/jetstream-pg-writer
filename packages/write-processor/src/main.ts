@@ -47,6 +47,7 @@ async function main() {
         filter_subject: filterSubject,
         max_deliver: 3,
         ack_wait: 30_000_000_000,
+        max_ack_pending: 100,
       });
       log.info({ consumer: name, filterSubject }, 'Created consumer');
     } catch {
