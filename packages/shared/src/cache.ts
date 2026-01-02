@@ -8,9 +8,14 @@ const CACHE_KEYS_SET = {
 
 type CacheNamespace = keyof typeof CACHE_KEYS_SET;
 
+// Tracking set TTL should outlive individual cache entries to avoid premature cleanup
+// but not live forever. 2x the cache TTL is a reasonable heuristic.
+const TRACKING_SET_TTL_MULTIPLIER = 2;
+
 /**
  * Set a cache value and track the key for efficient invalidation.
  * Uses a Redis Set to track keys per namespace instead of SCAN.
+ * Tracking set has TTL to prevent unbounded growth from expired keys.
  */
 export async function setTrackedCache(
   redis: Redis,
@@ -19,9 +24,13 @@ export async function setTrackedCache(
   value: string,
   ttlSeconds: number
 ): Promise<void> {
+  const setKey = CACHE_KEYS_SET[namespace];
+  const setTtl = ttlSeconds * TRACKING_SET_TTL_MULTIPLIER;
+
   await redis.pipeline()
     .setex(key, ttlSeconds, value)
-    .sadd(CACHE_KEYS_SET[namespace], key)
+    .sadd(setKey, key)
+    .expire(setKey, setTtl) // Refresh TTL on each write
     .exec();
 }
 

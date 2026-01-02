@@ -12,6 +12,10 @@ CREATE TABLE IF NOT EXISTS write_operations (
 
 CREATE INDEX IF NOT EXISTS idx_write_operations_created ON write_operations(created_at);
 
+-- Partial index for monitoring stuck/pending operations (most operations complete quickly)
+CREATE INDEX IF NOT EXISTS idx_write_operations_pending ON write_operations(created_at)
+  WHERE status = 'pending';
+
 -- Users table
 CREATE TABLE IF NOT EXISTS users (
   user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

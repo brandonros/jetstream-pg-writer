@@ -54,6 +54,7 @@ export class WriteClient {
   private consecutiveFailures = 0;
   private circuitOpen = false;
   private circuitOpenedAt = 0;
+  private halfOpenInProgress = false; // Prevents race in half-open state
 
   constructor(log: Logger, config: Partial<BackpressureConfig> = {}) {
     this.log = log;
@@ -85,7 +86,11 @@ export class WriteClient {
       if (elapsed < this.config.circuitResetMs) {
         throw new CircuitOpenError('Circuit breaker open, try again later');
       }
-      // Half-open: allow one request through to test
+      // Half-open: allow exactly one request through to test
+      if (this.halfOpenInProgress) {
+        throw new CircuitOpenError('Circuit breaker half-open, test in progress');
+      }
+      this.halfOpenInProgress = true;
       this.log.info('Circuit half-open, testing connection');
     }
 
@@ -110,6 +115,7 @@ export class WriteClient {
       if (this.circuitOpen) {
         this.log.info('Circuit breaker closed after successful publish');
         this.circuitOpen = false;
+        this.halfOpenInProgress = false;
       }
       this.consecutiveFailures = 0;
 
@@ -117,7 +123,12 @@ export class WriteClient {
     } catch (error) {
       this.consecutiveFailures++;
 
-      if (this.consecutiveFailures >= this.config.circuitFailureThreshold && !this.circuitOpen) {
+      // Half-open test failed - reopen circuit
+      if (this.halfOpenInProgress) {
+        this.circuitOpenedAt = Date.now(); // Reset timeout
+        this.halfOpenInProgress = false;
+        this.log.warn('Half-open test failed, circuit remains open');
+      } else if (this.consecutiveFailures >= this.config.circuitFailureThreshold && !this.circuitOpen) {
         this.circuitOpen = true;
         this.circuitOpenedAt = Date.now();
         this.log.warn({ failures: this.consecutiveFailures }, 'Circuit breaker opened');
