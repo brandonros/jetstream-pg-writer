@@ -87,7 +87,7 @@ async function main() {
   fastify.log.info('Connected to Postgres');
 
   // Start CDC consumer for cache invalidation (Debezium → JetStream)
-  startCdcConsumer({ nc, js, redis, log: fastify.log });
+  await startCdcConsumer({ nc, js, redis, log: fastify.log });
 
   await fastify.listen({ port, host });
 
